@@ -16,7 +16,10 @@ def index(request: Request):
 
 @app.post("/import-csv")
 async def import_csv(csv_file: UploadFile = File(...)):
-    return {"filename": csv_file.filename, "message": "CSV received successfully"}
+    content = await csv_file.read()
+    print(csv_file.filename)
+    print(len(content))
+    return {"filename": csv_file.filename, "size": len(content), "message": "CSV received successfully"}
 
 @app.post("/instruments", response_model=InstrumentResponse)
 def create_instrument(instrument: InstrumentCreate):
