@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from app.database import SessionLocal
+from app.importer import import_mt5_csv, get_symbol
 from app.models import Instrument
 from app.schemas import InstrumentCreate, InstrumentResponse
 
@@ -15,28 +16,42 @@ def index(request: Request):
     return templates.TemplateResponse(request=request, name="index.html")
 
 @app.post("/import-csv")
-async def import_csv(csv_file: UploadFile = File(...)):
-    content = await csv_file.read()
-    print(csv_file.filename)
-    print(len(content))
-    return {"filename": csv_file.filename, "size": len(content), "message": "CSV received successfully"}
+def import_csv(csv_file: UploadFile = File(...)):
+    db = SessionLocal()
+    try:
+        symbol = get_symbol(csv_file.filename)
+        instrument = db.query(Instrument).filter(Instrument.symbol == symbol).first()
+        if instrument is not None:
+            return {
+                "filename": csv_file.filename,
+                "imported": False,
+                "message": f"{symbol} already exists in database. Import stopped."
+            }
+        result = import_mt5_csv(csv_file.file, csv_file.filename, db)
+        return {
+            "filename": csv_file.filename,
+            "imported": True,
+            "message": "CSV imported successfully",
+            **result
+        }
+    finally:
+        db.close()
 
 @app.post("/instruments", response_model=InstrumentResponse)
 def create_instrument(instrument: InstrumentCreate):
     db = SessionLocal()
     try:
-        db_instrument = Instrument(symbol=instrument.symbol, type=instrument.type)
-        db.add(db_instrument)
-        db.commit()
-        db.refresh(db_instrument)
+        db_instrument = db.query(Instrument).filter(
+            Instrument.symbol == instrument.symbol
+        ).first()
+        if db_instrument is None:
+            db_instrument = Instrument(
+                symbol=instrument.symbol,
+                type=instrument.type
+            )
+            db.add(db_instrument)
+            db.commit()
+            db.refresh(db_instrument)
         return db_instrument
-    finally:
-        db.close()
-
-@app.get("/instruments", response_model=list[InstrumentResponse])
-def get_instruments():
-    db = SessionLocal()
-    try:
-        return db.query(Instrument).all()
     finally:
         db.close()

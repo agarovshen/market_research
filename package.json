@@ -1,0 +1,26 @@
+{
+    "name": "market_research",
+    "version": "1.0.0",
+    "description": "A Python-based market research platform for importing, storing, and analyzing financial market data.",
+    "main": "index.js",
+    "scripts": {
+        "test": "echo \"Error: no test specified\" && exit 1",
+        "build": "tailwindcss -i ./app/static/css/input.css -o ./app/static/css/tailwind.css",
+        "watch": "tailwindcss -i ./app/static/css/input.css -o ./app/static/css/tailwind.css --watch"
+    },
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/agarovshen/market_research.git"
+    },
+    "keywords": [],
+    "author": "",
+    "license": "ISC",
+    "bugs": {
+        "url": "https://github.com/agarovshen/market_research/issues"
+    },
+    "homepage": "https://github.com/agarovshen/market_research#readme",
+    "devDependencies": {
+        "@tailwindcss/cli": "^4.3.3",
+        "tailwindcss": "^4.3.3"
+    }
+}
