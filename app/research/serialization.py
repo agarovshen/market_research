@@ -21,6 +21,12 @@ from app.research.models import (
     ResearchResult, SelectionRule, TrainTestSplit, WalkForwardConfig,
     WalkForwardResult, WalkForwardWindowResult,
 )
+from app.research.advanced import (
+    AdvancedResearchResult, CorrelationMatrix, MonteCarloResult, ParameterSensitivity,
+    PortfolioPoint, PortfolioResearchResult, RegimeDefinition, RegimeObservation,
+    RegimeResult, RegimeStatistics, RobustnessPoint, RobustnessResult, RobustnessScenario,
+    SensitivityCell, WalkForwardAggregate, WalkForwardWindowAggregate,
+)
 from app.research.parameters import (
     ChoiceParameter, FixedParameter, FloatRange, IntegerRange, ParameterSet, ParameterSpace,
 )
@@ -35,6 +41,10 @@ _DATACLASSES = {
         FailureInfo, OutOfSampleResult, ResearchResult, SelectionRule,
         TrainTestSplit, WalkForwardConfig, WalkForwardResult, WalkForwardWindowResult,
         ChoiceParameter, FixedParameter, FloatRange, IntegerRange, ParameterSet, ParameterSpace,
+        AdvancedResearchResult, CorrelationMatrix, MonteCarloResult, ParameterSensitivity,
+        PortfolioPoint, PortfolioResearchResult, RegimeDefinition, RegimeObservation,
+        RegimeResult, RegimeStatistics, RobustnessPoint, RobustnessResult, RobustnessScenario,
+        SensitivityCell, WalkForwardAggregate, WalkForwardWindowAggregate,
     )
 }
 _ENUMS = {cls.__name__: cls for cls in (OrderAction, Side, ExperimentPhase, ExperimentStatus)}
@@ -104,4 +114,17 @@ def decode_result(payload: dict[str, Any]) -> ResearchResult:
     result = decode(payload["result"])
     if not isinstance(result, ResearchResult):
         raise ValueError("Stored payload is not a ResearchResult")
+    return result
+
+
+def encode_advanced_result(result: AdvancedResearchResult) -> dict[str, Any]:
+    return {"schema_version": 1, "result": encode(result)}
+
+
+def decode_advanced_result(payload: dict[str, Any]) -> AdvancedResearchResult:
+    if payload.get("schema_version") != 1 or "result" not in payload:
+        raise ValueError("Unsupported or malformed advanced research payload")
+    result = decode(payload["result"])
+    if not isinstance(result, AdvancedResearchResult):
+        raise ValueError("Stored payload is not an AdvancedResearchResult")
     return result

@@ -6,8 +6,11 @@ from sqlalchemy import DateTime, JSON, String, func, select
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.database import Base
+from app.research.advanced import AdvancedResearchResult
 from app.research.models import ResearchResult
-from app.research.serialization import decode_result, encode_result
+from app.research.serialization import (
+    decode_advanced_result, decode_result, encode_advanced_result, encode_result,
+)
 
 
 class ResearchExperimentRecord(Base):
@@ -78,3 +81,42 @@ class ResearchResultRepository:
             .order_by(ResearchExperimentRecord.experiment_id)
         ).all()
         return tuple(decode_result(record.payload) for record in records)
+
+
+class ResearchAnalysisRecord(Base):
+    __tablename__ = "research_analyses"
+
+    analysis_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    method: Mapped[str] = mapped_column(String(40), nullable=False, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False,
+                                                 server_default=func.now())
+
+
+class ResearchAnalysisRepository:
+    """Persist deterministic advanced outputs with their source/config metadata."""
+
+    def __init__(self, session: Session):
+        self.session = session
+
+    def save(self, result: AdvancedResearchResult) -> None:
+        payload = encode_advanced_result(result)
+        record = self.session.get(ResearchAnalysisRecord, result.analysis_id)
+        if record is not None:
+            if record.payload != payload:
+                raise ValueError(f"Advanced analysis identity collision: {result.analysis_id}")
+            return
+        self.session.add(ResearchAnalysisRecord(
+            analysis_id=result.analysis_id, method=result.method, payload=payload))
+        self.session.flush()
+
+    def get(self, analysis_id: str) -> AdvancedResearchResult | None:
+        record = self.session.get(ResearchAnalysisRecord, analysis_id)
+        return None if record is None else decode_advanced_result(record.payload)
+
+    def list_for_method(self, method: str) -> tuple[AdvancedResearchResult, ...]:
+        records = self.session.scalars(
+            select(ResearchAnalysisRecord).where(ResearchAnalysisRecord.method == method)
+            .order_by(ResearchAnalysisRecord.analysis_id)
+        ).all()
+        return tuple(decode_advanced_result(record.payload) for record in records)

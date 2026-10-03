@@ -25,6 +25,13 @@ from app.research.parameters import (
     ParameterSet,
     ParameterSpace,
 )
+from app.research.advanced import (
+    AdvancedResearchResult, CorrelationMatrix, MonteCarloResult, ParameterSensitivity, PortfolioResearchResult,
+    RegimeDefinition, RegimeResult, RobustnessResult, RobustnessScenario,
+    WalkForwardAggregate, WalkForwardWindowAggregate, aggregate_walk_forward,
+    analyze_regimes, correlate_equity_returns, evaluate_robustness, monte_carlo_trades,
+    parameter_sensitivity, weighted_rebalanced_portfolio,
+)
 
 __all__ = [
     "BatchResearchResult", "CandidateSelection", "ChoiceParameter", "DateRange",
@@ -33,6 +40,12 @@ __all__ = [
     "ParameterSet", "ParameterSpace", "ResearchEngine", "ResearchResult",
     "ResearchResultStore", "SelectionRule", "StrategyFactory", "TrainTestSplit", "WalkForwardConfig",
     "WalkForwardResult", "WalkForwardWindowResult", "ResearchResultRepository",
+    "ResearchAnalysisRepository", "AdvancedResearchResult",
+    "CorrelationMatrix", "MonteCarloResult", "ParameterSensitivity", "PortfolioResearchResult",
+    "RegimeDefinition", "RegimeResult", "RobustnessResult", "RobustnessScenario",
+    "WalkForwardAggregate", "WalkForwardWindowAggregate", "aggregate_walk_forward",
+    "analyze_regimes", "correlate_equity_returns", "evaluate_robustness",
+    "monte_carlo_trades", "parameter_sensitivity", "weighted_rebalanced_portfolio",
 ]
 
 
@@ -41,4 +54,7 @@ def __getattr__(name: str):
     if name == "ResearchResultRepository":
         from app.research.storage import ResearchResultRepository
         return ResearchResultRepository
+    if name == "ResearchAnalysisRepository":
+        from app.research.storage import ResearchAnalysisRepository
+        return ResearchAnalysisRepository
     raise AttributeError(name)

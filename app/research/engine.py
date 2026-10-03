@@ -271,7 +271,7 @@ class ResearchEngine:
                 validation_errors[parameter_set] = FailureInfo(type(error).__name__, str(error))
 
         bars = self._load_phase(config.symbol, config.timeframe, period)
-        dataset_id = self._fingerprint(config.symbol, config.timeframe, period, bars)
+        dataset_id = self.fingerprint_dataset(config.symbol, config.timeframe, period, bars)
         candidate_set_fingerprint = candidate_set_fingerprint or self._candidate_fingerprint(parameters)
         cached_runner = BacktestRunner(_CachedRepository(config.symbol, config.timeframe, period, bars))
         analyzer = (self.analysis_engine if analysis_settings == self.analysis_engine.settings
@@ -343,7 +343,9 @@ class ResearchEngine:
         return result
 
     @staticmethod
-    def _fingerprint(symbol: str, timeframe: str, period: DateRange, bars: tuple[Bar, ...]) -> str:
+    def fingerprint_dataset(symbol: str, timeframe: str, period: DateRange,
+                            bars: tuple[Bar, ...]) -> str:
+        """Return the canonical fingerprint used to bind results to market data."""
         digest = sha256()
         header = json.dumps(json_value((symbol, timeframe, period)), sort_keys=True,
                             separators=(",", ":"), allow_nan=False)
@@ -353,6 +355,8 @@ class ResearchEngine:
             digest.update(b"\n")
             digest.update(line.encode("utf-8"))
         return digest.hexdigest()
+
+    _fingerprint = fingerprint_dataset
 
     @staticmethod
     def _candidate_fingerprint(parameters: tuple[ParameterSet, ...]) -> str:

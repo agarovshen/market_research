@@ -8,12 +8,17 @@ from app.database import SessionLocal
 from app.importer import get_symbol,import_mt5_csv
 from app.models import Instrument,MarketData
 from app.schemas import InstrumentCreate,InstrumentResponse
+from app.research.api import router as research_router
 app=FastAPI()
+app.include_router(research_router)
 templates=Jinja2Templates(directory="app/templates")
 app.mount("/static",StaticFiles(directory="app/static"),name="static")
 @app.get("/",response_class=HTMLResponse)
 def index(request:Request):
     return templates.TemplateResponse(request=request,name="index.html")
+@app.get("/research",response_class=HTMLResponse)
+def research_workspace(request:Request):
+    return templates.TemplateResponse(request=request,name="research.html")
 @app.post("/import-csv")
 def import_csv(csv_file:UploadFile=File(...)):
     db=SessionLocal()
