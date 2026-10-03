@@ -47,10 +47,9 @@ class ResearchApplicationService:
 
     def available_strategies(self) -> list[dict[str, Any]]:
         return [{"id": factory.strategy_id, "version": factory.strategy_version,
-                 "parameters": [
-                     {"name": "fast_period", "kind": "integer", "minimum": 2, "maximum": 100},
-                     {"name": "slow_period", "kind": "integer", "minimum": 5, "maximum": 300},
-                 ]} for factory in STRATEGY_FACTORIES.values()]
+                 "parameters": [dict(parameter) for parameter in
+                                getattr(factory, "parameter_schema", ())]}
+                for factory in STRATEGY_FACTORIES.values()]
 
     def market_data_catalog(self, symbol: str) -> dict[str, Any]:
         instrument = self.session.query(Instrument).filter(
@@ -95,7 +94,9 @@ class ResearchApplicationService:
                                     analysis_settings=analysis_settings)
         if method == "batch":
             search_method = request.get("search_method", "grid")
-            if search_method == "grid":
+            if not parameter_space.parameters:
+                candidates = (ParameterSet(()),)
+            elif search_method == "grid":
                 candidates = _bounded(parameter_space.grid())
             elif search_method == "random":
                 candidates = parameter_space.random(request["count"], seed=request["seed"])
@@ -111,7 +112,9 @@ class ResearchApplicationService:
         if split.training.start < period.start or split.testing.end > period.end:
             raise ValueError("Training and testing periods must be inside the configured overall period")
         search_method = request.get("search_method", "grid")
-        if search_method == "random":
+        if not parameter_space.parameters:
+            candidates = (ParameterSet(()),)
+        elif search_method == "random":
             candidates = tuple(parameter_space.random(request["count"], seed=request["seed"]))
         elif search_method == "grid":
             candidates = tuple(_bounded(parameter_space.grid()))

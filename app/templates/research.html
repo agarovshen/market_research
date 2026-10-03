@@ -4,6 +4,7 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="color-scheme" content="dark"><title>Research Workspace · Market Research</title>
   <link rel="stylesheet" href="/static/css/research.css">
+  <link rel="stylesheet" href="/static/css/research-workspace.css">
   <script src="/static/js/chart.js"></script>
   <script src="/static/js/luxon.min.js"></script>
   <script src="/static/js/chartjs-adapter-luxon.min.js"></script>
@@ -23,11 +24,9 @@
           <p id="data-range" class="hint">Market data availability will appear here.</p>
         </fieldset>
         <fieldset><legend>Parameters</legend>
-          <div id="single-parameters" class="range"><label>Fast period<input type="number" name="fast_period" min="2" value="10"></label><label>Slow period<input type="number" name="slow_period" min="5" value="30"></label></div>
-          <div id="space-parameters" hidden>
-            <div class="range"><label>Fast minimum<input type="number" name="fast_min" min="2" value="5"></label><label>Fast maximum<input type="number" name="fast_max" min="2" value="25"></label><label>Fast step<input type="number" name="fast_step" min="1" value="5"></label></div>
-            <div class="range"><label>Slow minimum<input type="number" name="slow_min" min="5" value="30"></label><label>Slow maximum<input type="number" name="slow_max" min="5" value="90"></label><label>Slow step<input type="number" name="slow_step" min="1" value="15"></label></div>
-          </div>
+          <p id="parameter-empty" class="hint" hidden>This strategy has no configurable parameters.</p>
+          <div id="single-parameters" class="strategy-parameters"></div>
+          <div id="space-parameters" class="strategy-parameters" hidden></div>
         </fieldset>
         <fieldset id="search-config" hidden><legend>Search &amp; selection</legend>
           <div class="range"><label>Search method<select name="search_method"><option value="grid">Deterministic grid</option><option value="random">Seeded random</option></select></label><label>Sample count<input type="number" name="count" min="1" max="10000" value="25"></label><label>Seed<input type="number" name="seed" value="42"></label></div>
@@ -41,7 +40,12 @@
       <section class="results">
         <div class="result-heading"><div><small>RESEARCH OUTPUT</small><h2 id="result-title">No experiment loaded</h2></div><button id="clear-results" type="button">Clear</button></div>
         <div id="error" class="error" role="alert" hidden></div><div id="summary" class="metrics" hidden></div>
-        <div class="chart-box"><canvas id="equity-chart" aria-label="Backtest equity"></canvas><p id="chart-empty">Equity curve will appear after a completed backtest.</p></div>
+        <div class="chart-box"><canvas id="equity-chart" aria-label="Selected result equity"></canvas><p id="chart-empty">Equity curve will appear after a completed backtest.</p></div>
+        <section class="trade-history" aria-labelledby="trade-history-title">
+          <div class="result-heading"><div><h3 id="trade-history-title">Trade History</h3><p id="trade-result-context" class="hint">Select a completed experiment to inspect its trades.</p></div><button id="inspect-trades" type="button" disabled>View on price chart</button></div>
+          <p id="trade-empty" class="hint">No completed trades.</p>
+          <div class="table-wrap"><table><thead><tr><th>#</th><th>Side</th><th>Entry time</th><th>Exit time</th><th>Entry</th><th>Exit</th><th>Quantity</th><th>Gross P&amp;L</th><th>Net P&amp;L</th><th>Commission</th><th>Duration</th><th>Chart</th></tr></thead><tbody id="trade-records"></tbody></table></div>
+        </section>
         <div class="advanced-tools" id="advanced-tools" hidden>
           <label>Metric<select id="advanced-metric"><option value="total_return">Total return</option><option value="trades.net_profit">Net profit</option><option value="risk.sharpe_ratio">Sharpe</option></select></label>
           <label>Seed<input id="mc-seed" type="number" value="42"></label><label>Simulations<input id="mc-count" type="number" min="1" max="100000" value="1000"></label>
@@ -54,7 +58,7 @@
           <small id="correlation-hint" class="tool-hint" role="status">Correlation needs at least two completed results from the same phase and data period.</small>
           <button id="run-portfolio" type="button">Equal-weight research curve</button>
           <small id="portfolio-hint" class="tool-hint" role="status">Portfolio curve needs at least two completed aligned results.</small>
-          <button id="run-mc" type="button">Trade bootstrap</button><button id="run-regime" type="button">Regime report</button>
+          <button id="run-mc" type="button">Trade bootstrap</button><small id="mc-hint" class="tool-hint" role="status">Trade bootstrap needs at least one completed trade and no open position.</small><button id="run-regime" type="button">Regime report</button>
         </div>
         <div id="advanced-output" class="advanced-output" hidden></div>
         <h3>Experiment records</h3><div class="table-wrap"><table><thead><tr><th>Phase</th><th>Status</th><th>Parameters</th><th>Return</th><th>Net P&amp;L</th><th>Trades</th><th>Identity</th><th>Failure details</th></tr></thead><tbody id="records"></tbody></table></div>
@@ -63,6 +67,8 @@
     </div>
   </main>
   <script src="/static/js/research-state.js"></script>
+  <script src="/static/js/research-parameters.js"></script>
+  <script src="/static/js/trade-history.js"></script>
   <script src="/static/js/research-presentation.js"></script>
   <script src="/static/js/research-workspace.js"></script>
 </body>

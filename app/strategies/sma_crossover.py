@@ -30,6 +30,12 @@ class SMACrossover:
 class SMACrossoverFactory:
     strategy_id = "moving_average.sma_crossover"
     strategy_version = "1.0.0"
+    parameter_schema = (
+        {"name": "fast_period", "label": "Fast period", "kind": "integer",
+         "default": 10, "minimum": 2, "maximum": 100, "step": 1},
+        {"name": "slow_period", "label": "Slow period", "kind": "integer",
+         "default": 30, "minimum": 5, "maximum": 300, "step": 1},
+    )
 
     def validate(self, parameters: Mapping[str, ParameterValue]) -> None:
         if set(parameters) != {"fast_period", "slow_period"}:

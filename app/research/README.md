@@ -90,6 +90,15 @@ selection, and anchored/rolling walk-forward. The current versioned strategy
 registry contains a simple long-only SMA crossover so the workflow is runnable;
 it is an example strategy, not a performance recommendation.
 
+Strategy factories may expose a serializable `parameter_schema`; the workspace
+renders supported scalar parameter types from that schema and does not reserve
+fields for any particular strategy. A strategy with no schema runs with an
+empty parameter set. The market chart is strategy-neutral: it renders raw
+OHLC and receives selected-result trade/order records through the workspace's
+chart handoff. Trade History reads canonical `BacktestResult.trades`; it does
+not reconstruct accounting. Indicators, volume bars, and per-bar return panels
+are not generic chart dependencies.
+
 Advanced analyses accept stored Stage 1/2 results and preserve input experiment
 IDs and configuration in research_analyses. The new table is added by the
 same Stage 4 Alembic migration as experiments. Advanced result IDs hash the

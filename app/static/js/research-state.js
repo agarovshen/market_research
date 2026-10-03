@@ -6,7 +6,7 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
-  function compatibleGroups(rows) {
+  function compatibleGroups(rows, includeSettings) {
     const groups = new Map();
     for (const row of rows) {
       if (row.status !== "completed" || !row.analysis_result) continue;
@@ -17,8 +17,7 @@
         definition.timeframe,
         definition.period,
         definition.dataset_fingerprint,
-        definition.backtest_config,
-        definition.analysis_config,
+        ...(includeSettings ? [definition.backtest_config, definition.analysis_config] : []),
       ]);
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push(row);
@@ -37,15 +36,38 @@
   }
 
   function alignedCorrelationGroup(rows) {
-    return preferredGroup(compatibleGroups(rows), { oos: 0, batch: 1, train: 2 });
+    // Correlation/portfolio calculations require the same observations, not
+    // identical execution costs or analysis settings.
+    return preferredGroup(compatibleGroups(rows, false), { oos: 0, batch: 1, train: 2 });
   }
 
   function sensitivityGroup(rows) {
-    const groups = compatibleGroups(rows).filter(group =>
+    const groups = compatibleGroups(rows, true).filter(group =>
       group.every(row => row.definition.strategy_id === group[0].definition.strategy_id &&
         row.definition.strategy_version === group[0].definition.strategy_version));
-    return preferredGroup(groups, { batch: 0, train: 1 });
+    const group = preferredGroup(groups, { batch: 0, train: 1 });
+    const unique = new Map();
+    for (const row of group) {
+      const configured = row.definition.parameters?.values;
+      const values = configured ? JSON.stringify(configured) : row.definition.experiment_id;
+      if (!unique.has(values)) unique.set(values, row);
+    }
+    return [...unique.values()];
   }
 
-  return { alignedCorrelationGroup, sensitivityGroup };
+  function sensitivityParameters(rows) {
+    if (rows.length < 2) return [];
+    const configurations = rows.map(row => Object.fromEntries(row.definition.parameters?.values || []));
+    const names = Object.keys(configurations[0] || {});
+    return names.filter(name => configurations.some(config =>
+      JSON.stringify(config[name]) !== JSON.stringify(configurations[0][name]))).slice(0, 8);
+  }
+
+  function monteCarloBaseline(rows, preferredId) {
+    const eligible = rows.filter(row => row.status === "completed" && row.backtest_result &&
+      !row.backtest_result.open_position && (row.backtest_result.trades || []).length > 0);
+    return eligible.find(row => row.definition.experiment_id === preferredId) || eligible[0] || null;
+  }
+
+  return { alignedCorrelationGroup, sensitivityGroup, sensitivityParameters, monteCarloBaseline };
 });

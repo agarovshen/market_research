@@ -3,6 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
     <title>Market Research</title>
     <link rel="stylesheet" href="/static/css/tailwind.css">
     <script src="/static/js/chart.js"></script>
@@ -12,107 +13,115 @@
     <script src="/static/js/chartjs-plugin-zoom.min.js"></script>
     <script src="/static/js/chartjs-chart-financial.min.js"></script>
 </head>
-<body>
-    <header>
+<body class="research-app">
+    <header class="terminal-header">
         <a href="/research" class="file-button">Research workspace</a>
-        <div>
-            <div>
-                <h1>Market Research</h1>
-                <p>Quantitative research workspace</p>
-            </div>
-            <div>
-                <form id="import-form">
-                    <input id="csv-file" type="file" accept=".csv,.txt">
-                    <button type="submit">Import</button>
-                    <span id="file-name"></span>
-                    <span id="status" role="status" aria-live="polite"></span>
-                </form>
-            </div>
-            <div>
-                <label for="instrument">Instrument</label>
-                <select id="instrument">
-                    <option value="EURUSD">EURUSD</option>
-                </select>
-                <label for="timeframe">Timeframe</label>
-                <select id="timeframe">
-                    <option value="M1">M1</option>
-                    <option value="M5">M5</option>
-                    <option value="M15">M15</option>
-                    <option value="H1">H1</option>
-                    <option value="H4">H4</option>
-                    <option value="D1">D1</option>
-                </select>
-            </div>
+        <div class="brand-lockup">
+            <div class="brand-mark" aria-hidden="true">MR</div>
+            <div><h1>Market Research</h1><p>Historical data &amp; strategy research</p></div>
+        </div>
+        <div class="header-actions">
+            <label class="instrument-control"><span>Instrument</span>
+                <select id="instrument" aria-label="Instrument"><option value="EURUSD">EURUSD</option></select>
+            </label>
+            <form id="import-form" class="import-form">
+                <label class="file-button" for="csv-file">Import data</label>
+                <input id="csv-file" type="file" accept=".csv,.txt">
+                <span id="file-name" class="file-name"></span>
+                <button type="submit" id="import-submit">Import</button>
+            </form>
         </div>
     </header>
-    <main>
-        <section id="dataset-summary" aria-label="Dataset summary">
-            <article>
-                <h2>Observations</h2>
-                <p id="observations">—</p>
-            </article>
-            <article>
-                <h2>Start</h2>
-                <p id="start-date">—</p>
-            </article>
-            <article>
-                <h2>End</h2>
-                <p id="end-date">—</p>
-            </article>
-            <article>
-                <h2>Last Close</h2>
-                <p id="last-close">—</p>
-            </article>
-            <article>
-                <h2>Spread</h2>
-                <p id="spread">—</p>
-            </article>
-        </section>
-        <section id="price-analysis" aria-labelledby="price-title">
-            <div>
-                <h2 id="price-title">Price Analysis</h2>
-                <div>
-                    <label for="range-slider">Candles: <span id="range-value">1000</span></label>
-                    <input id="range-slider" type="range" min="100" max="5000" step="100" value="1000">
+
+    <main class="research-main">
+        <div class="workspace-heading">
+            <div><span class="eyebrow">MARKET DATA</span><h2 id="workspace-symbol">EURUSD</h2></div>
+            <div class="dataset-meta">
+                <span><small>Bars</small><b id="observations">—</b></span>
+                <span><small>History</small><b id="history-range">—</b></span>
+                <span><small>Last</small><b id="last-close">—</b></span>
+                <span><small>Spread</small><b id="spread">—</b></span>
+            </div>
+            <div id="status" class="status" role="status" aria-live="polite"></div>
+        </div>
+
+        <section class="chart-workspace" aria-label="Quantitative research chart">
+            <div class="chart-toolbar" role="toolbar" aria-label="Chart controls">
+                <div class="toolbar-group timeframe-group" role="group" aria-label="Timeframe">
+                    <button type="button" data-timeframe="M1" class="timeframe-button active">M1</button>
+                    <button type="button" data-timeframe="M5" class="timeframe-button">M5</button>
+                    <button type="button" data-timeframe="M15" class="timeframe-button">M15</button>
+                    <button type="button" data-timeframe="H1" class="timeframe-button">H1</button>
+                    <button type="button" data-timeframe="H4" class="timeframe-button">H4</button>
+                    <button type="button" data-timeframe="D1" class="timeframe-button">D1</button>
+                </div>
+                <span class="toolbar-divider"></span>
+                <label class="toolbar-select">Style
+                    <select id="chart-type" aria-label="Chart type"><option value="candlestick">Candles</option><option value="line">Line</option></select>
+                </label>
+                <div class="toolbar-group zoom-group" role="group" aria-label="Viewport">
+                    <button type="button" id="zoom-in" title="Zoom in (+)" aria-label="Zoom in">＋</button>
+                    <button type="button" id="zoom-out" title="Zoom out (-)" aria-label="Zoom out">−</button>
+                    <button type="button" id="reset-view" title="Reset view (R)">Reset</button>
+                    <button type="button" id="fit-data" title="Fit all loaded bars">Fit all</button>
+                </div>
+                <label class="count-control">Visible
+                    <input id="visible-count" type="number" min="50" max="5000" step="50" value="1000" aria-label="Visible candle count">
+                </label>
+                <span class="toolbar-divider toolbar-spacer"></span>
+                <label class="switch-control" title="Crosshair (C)"><input id="toggle-crosshair" type="checkbox" checked><span>Crosshair</span></label>
+                <label class="switch-control"><input id="toggle-grid" type="checkbox" checked><span>Grid</span></label>
+                <div class="toolbar-overflow">
+                    <label class="switch-control"><input id="toggle-auto-scale" type="checkbox" checked><span>Auto scale</span></label>
+                    <label class="switch-control"><input id="toggle-equity" type="checkbox"><span>Equity</span></label>
+                    <label class="switch-control"><input id="toggle-drawdown" type="checkbox"><span>Drawdown</span></label>
+                </div>
+                <button type="button" id="toolbar-menu" class="mobile-menu" aria-expanded="false" aria-label="More chart controls">•••</button>
+            </div>
+
+            <div class="chart-subtoolbar">
+                <div class="ohlc-strip" aria-label="Candle information">
+                    <span class="ohlc-symbol" id="ohlc-symbol">EURUSD</span>
+                    <span>O <b data-field="open">—</b></span><span>H <b data-field="high">—</b></span>
+                    <span>L <b data-field="low">—</b></span><span>C <b data-field="close">—</b></span>
+                    <span>Chg <b data-field="change">—</b></span><span>Chg% <b data-field="changePct">—</b></span>
+                    <span>Spr <b data-field="spread">—</b></span>
+                </div>
+                <div class="chart-tools">
+                    <span id="crosshair-time" class="crosshair-time">—</span>
                 </div>
             </div>
-            <div>
-                <canvas id="price-chart"></canvas>
+
+            <div class="chart-layout">
+                <div class="chart-panels">
+                    <section id="panel-price" class="chart-panel price-panel" aria-label="Price chart">
+                        <div class="panel-heading"><span>PRICE</span><span id="freeze-indicator">LIVE CROSSHAIR</span></div>
+                        <div class="canvas-wrap"><canvas id="price-chart" aria-label="Candlestick and line price chart"></canvas><canvas id="price-chart-overlay" class="chart-overlay" aria-hidden="true"></canvas></div>
+                    </section>
+                    <section id="panel-equity" class="chart-panel small-panel research-panel" aria-label="Backtest equity panel" hidden>
+                        <div class="panel-heading"><span>BACKTEST EQUITY</span><span id="equity-caption">No result loaded</span></div>
+                        <div class="canvas-wrap"><canvas id="equity-chart" aria-label="Synchronized backtest equity chart"></canvas><canvas id="equity-chart-overlay" class="chart-overlay" aria-hidden="true"></canvas></div>
+                    </section>
+                    <section id="panel-drawdown" class="chart-panel small-panel research-panel" aria-label="Backtest drawdown panel" hidden>
+                        <div class="panel-heading"><span>DRAWDOWN</span><span id="drawdown-caption">No drawdown data supplied</span></div>
+                        <div class="canvas-wrap"><canvas id="drawdown-chart" aria-label="Synchronized backtest drawdown chart"></canvas><canvas id="drawdown-chart-overlay" class="chart-overlay" aria-hidden="true"></canvas></div>
+                    </section>
+                </div>
+                <aside id="trade-inspector" class="trade-inspector" aria-live="polite" hidden>
+                    <div class="inspector-heading"><div><span class="eyebrow">TRADE DETAIL</span><b id="trade-title">Trade</b></div><button type="button" id="close-inspector" aria-label="Close trade details">×</button></div>
+                    <dl id="trade-details"></dl>
+                </aside>
             </div>
+            <div class="chart-footer"><span id="selection-status">Click a bar to select · double-click to freeze</span><span>Wheel zoom · drag pan · Shift-drag zoom · pinch zoom · R reset · C crosshair</span></div>
         </section>
-        <section id="market-analysis" aria-label="Market analysis">
-            <article id="return-analysis">
-                <h2>Return Distribution</h2>
-                <div>
-                    <canvas id="return-chart"></canvas>
-                </div>
-            </article>
-            <article id="volume-analysis">
-                <h2>Volume Analysis</h2>
-                <div>
-                    <canvas id="volume-chart"></canvas>
-                </div>
-            </article>
-        </section>
-        <section id="statistical-metrics" aria-label="Statistical metrics">
-            <article>
-                <h2>Mean Return</h2>
-                <p id="mean-return">—</p>
-            </article>
-            <article>
-                <h2>Volatility</h2>
-                <p id="volatility">—</p>
-            </article>
-            <article>
-                <h2>Maximum Drawdown</h2>
-                <p id="drawdown">—</p>
-            </article>
-            <article>
-                <h2>Price Range</h2>
-                <p id="price-range">—</p>
-            </article>
+
+        <section class="data-import-dock" aria-label="Import status">
+            <span class="dock-indicator"></span><span>Historical data</span><span class="dock-muted">CSV · PostgreSQL</span>
+            <span id="import-status" class="dock-status">Ready</span>
         </section>
     </main>
+    <script src="/static/js/research-data.js"></script>
+    <script src="/static/js/research-chart.js"></script>
     <script src="/static/js/import-lock.js"></script>
     <script src="/static/js/app.js"></script>
 </body>

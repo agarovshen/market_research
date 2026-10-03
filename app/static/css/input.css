@@ -1,1 +1,272 @@
 @import "tailwindcss";
+body {
+    @apply min-h-screen bg-slate-950 text-slate-200;
+}
+header {
+    @apply border-b border-slate-800;
+}
+header > div {
+    @apply mx-auto flex max-w-[1600px] items-center justify-between px-6 py-5;
+}
+header h1 {
+    @apply text-xl font-semibold text-white;
+}
+header p {
+    @apply mt-1 text-sm text-slate-500;
+}
+header label {
+    @apply mr-2 text-xs text-slate-500;
+}
+header select {
+    @apply rounded-lg border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-300;
+}
+header select + label {
+    @apply ml-3;
+}
+main {
+    @apply mx-auto max-w-[1600px] space-y-6 px-6 py-6;
+}
+main > section {
+    @apply rounded-xl border border-slate-800 bg-slate-900/60 p-5;
+}
+main > section[aria-label="Dataset summary"],
+main > section[aria-label="Statistical metrics"] {
+    @apply grid gap-4 md:grid-cols-2 xl:grid-cols-5;
+}
+main > section[aria-label="Statistical metrics"] {
+    @apply xl:grid-cols-4;
+}
+article {
+    @apply rounded-xl border border-slate-800 bg-slate-900/60 p-5;
+}
+article h2 {
+    @apply text-sm font-semibold text-white;
+}
+article p {
+    @apply mt-1 text-xs text-slate-500;
+}
+main > section[aria-label="Dataset summary"] article p,
+main > section[aria-label="Statistical metrics"] article p {
+    @apply mt-2 text-xl font-semibold text-white;
+}
+main > section[aria-label="Dataset summary"] article:first-child p {
+    @apply text-2xl;
+}
+main > section[aria-label="Dataset summary"] article:nth-child(4) p {
+    @apply text-2xl;
+}
+main > section[aria-label="Dataset summary"] article:nth-child(5) p {
+    @apply text-2xl;
+}
+main > section[aria-labelledby="import-title"] > div:first-child {
+    @apply mb-5;
+}
+main > section[aria-labelledby="import-title"] form {
+    @apply flex flex-col gap-4 lg:flex-row lg:items-end;
+}
+main > section[aria-labelledby="import-title"] form > div {
+    @apply flex-1;
+}
+main > section[aria-labelledby="import-title"] label {
+    @apply mb-2 block text-xs font-medium text-slate-400;
+}
+#csv-file {
+    @apply block w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-300;
+}
+#csv-file::file-selector-button {
+    @apply mr-4 rounded-md border-0 bg-slate-800 px-3 py-2 text-xs font-medium text-slate-300;
+}
+#file-name {
+    @apply mt-2 text-xs text-slate-500;
+}
+#status {
+    @apply mt-4 rounded-xl border px-4 py-3 text-sm;
+}
+main button {
+    @apply rounded-lg px-3 py-2 text-xs font-medium transition;
+}
+main form button[type="submit"] {
+    @apply rounded-lg bg-cyan-500 px-5 py-2.5 text-sm font-semibold text-slate-950 hover:bg-cyan-400 disabled:cursor-not-allowed disabled:opacity-50;
+}
+main .range {
+    @apply bg-slate-800 text-slate-300;
+}
+main .range:not(:first-child) {
+    @apply bg-transparent text-slate-500;
+}
+main > section[aria-labelledby="price-title"] > div:first-child {
+    @apply mb-5 flex items-center justify-between;
+}
+main > section[aria-labelledby="price-title"] > div:first-child > div:last-child {
+    @apply flex gap-2;
+}
+main > section[aria-labelledby="price-title"] > div:last-child {
+    @apply h-[420px];
+}
+main > section[aria-label="Market analysis charts"] {
+    @apply grid gap-6 xl:grid-cols-2;
+}
+main > section[aria-label="Market analysis charts"] article > div {
+    @apply mt-5 h-[300px];
+}
+canvas {
+    @apply h-full w-full;
+}
+
+/* Research terminal */
+body.research-app {
+    min-width: 360px;
+    background: #0b1017;
+    color: #c8d2dd;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+.terminal-header {
+    position: sticky;
+    z-index: 20;
+    top: 0;
+    display: flex;
+    min-height: 62px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    border-bottom: 1px solid #202a35;
+    background: rgba(11, 16, 23, .96);
+    padding: 0 24px;
+    backdrop-filter: blur(12px);
+}
+header.terminal-header > div { max-width: none; margin: 0; padding: 0; }
+.brand-lockup, .header-actions, .import-form, .workspace-heading, .dataset-meta,
+.chart-toolbar, .toolbar-group, .chart-subtoolbar, .ohlc-strip, .chart-tools,
+.panel-heading, .chart-footer, .data-import-dock, .inspector-heading {
+    display: flex;
+    align-items: center;
+}
+.brand-lockup { gap: 11px; min-width: 210px; }
+.brand-mark {
+    display: grid; width: 34px; height: 34px; place-items: center;
+    border: 1px solid #315468; border-radius: 7px; color: #8bd3e5;
+    background: #10202b; font: 700 11px ui-monospace, monospace; letter-spacing: -.04em;
+}
+.brand-lockup h1 { margin: 0; color: #e5edf4; font-size: 13px; font-weight: 650; letter-spacing: .01em; }
+.brand-lockup p { margin: 2px 0 0; color: #718196; font-size: 10px; }
+.header-actions { justify-content: flex-end; gap: 18px; }
+.instrument-control { display: grid; gap: 4px; color: #718196; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.instrument-control select, .toolbar-select select, .compact-select select {
+    border: 1px solid #283541; border-radius: 4px; outline: 0; background: #111a23;
+    color: #d2dce5; font: 600 11px ui-monospace, monospace;
+}
+.instrument-control select { min-width: 95px; padding: 5px 8px; }
+.import-form { position: relative; gap: 7px; }
+.import-form input[type="file"] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
+.file-button, .import-form button {
+    display: inline-flex; align-items: center; justify-content: center; min-height: 29px;
+    border: 1px solid #2a3945; border-radius: 4px; background: #121c26; color: #a9bac9;
+    padding: 0 10px; font-size: 10px; cursor: pointer;
+}
+.import-form button { border-color: #28627a; background: #153342; color: #93d4e4; }
+.file-name { max-width: 160px; overflow: hidden; color: #77899a; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.research-main { width: min(1800px, 100%); margin: 0 auto; padding: 17px 22px 24px; }
+.workspace-heading { min-height: 52px; justify-content: space-between; gap: 18px; margin-bottom: 12px; }
+.workspace-heading > div:first-child { display: flex; align-items: baseline; gap: 10px; }
+.eyebrow { color: #71869a; font: 600 9px ui-monospace, monospace; letter-spacing: .12em; }
+.workspace-heading h2 { margin: 0; color: #e5edf4; font: 600 18px ui-monospace, monospace; }
+.dataset-meta { gap: clamp(13px, 2.5vw, 34px); }
+.dataset-meta span { display: grid; gap: 4px; }
+.dataset-meta small { color: #6e7e8e; font-size: 9px; letter-spacing: .08em; text-transform: uppercase; }
+.dataset-meta b { color: #b9c7d4; font: 500 10px ui-monospace, monospace; white-space: nowrap; }
+.status { position: fixed; z-index: 30; right: 20px; bottom: 18px; max-width: min(460px, 90vw); border: 1px solid #344451; border-radius: 5px; background: #131d27; padding: 8px 12px; color: #aab9c7; font-size: 11px; box-shadow: 0 10px 32px #0008; }
+.status[hidden] { display: none; }
+.status[data-kind="error"] { border-color: #8b4145; color: #ff9d9d; }
+.status[data-kind="warning"] { border-color: #8a713e; color: #e6c47c; }
+.status[data-kind="success"] { border-color: #2c7057; color: #85d2af; }
+.chart-workspace { overflow: hidden; border: 1px solid #27323d; border-radius: 6px; background: #0d131a; box-shadow: 0 14px 40px #0002; }
+.research-main > .chart-workspace { padding: 0; }
+.chart-toolbar { min-height: 45px; flex-wrap: wrap; gap: 8px; border-bottom: 1px solid #202a34; padding: 6px 10px; }
+.toolbar-group { gap: 2px; }
+.chart-toolbar button { min-height: 27px; border: 1px solid transparent; border-radius: 3px; background: transparent; color: #8fa0b0; padding: 0 8px; font: 500 10px ui-monospace, monospace; cursor: pointer; }
+.chart-toolbar button:hover, .chart-toolbar button:focus-visible { border-color: #344653; background: #17222d; color: #e0e9f0; outline: none; }
+.chart-toolbar .timeframe-button { min-width: 34px; }
+.chart-toolbar .timeframe-button.active { border-color: #34566a; background: #152d3b; color: #9bd9e8; }
+.toolbar-divider { width: 1px; height: 20px; margin: 0 3px; background: #29343f; }
+.toolbar-select, .count-control { display: flex; align-items: center; gap: 6px; color: #718196; font-size: 9px; }
+.toolbar-select select { padding: 5px 6px; font-size: 10px; }
+.count-control input { width: 62px; height: 27px; border: 1px solid #283541; border-radius: 3px; outline: 0; background: #111a23; color: #cbd6e0; padding: 0 5px; font: 10px ui-monospace, monospace; }
+.count-control input:focus { border-color: #4d8398; }
+.toolbar-spacer { margin-left: auto; }
+.switch-control { display: inline-flex; align-items: center; gap: 5px; color: #8a9aaa; font-size: 9px; white-space: nowrap; cursor: pointer; }
+.switch-control input { accent-color: #54b8d4; width: 12px; height: 12px; margin: 0; }
+.toolbar-overflow { display: contents; }
+.mobile-menu { display: none; }
+.chart-subtoolbar { min-height: 36px; justify-content: space-between; gap: 12px; border-bottom: 1px solid #1d2731; padding: 5px 12px; }
+.ohlc-strip { flex-wrap: wrap; gap: 5px 13px; color: #75879a; font: 9px ui-monospace, monospace; }
+.ohlc-strip > span { white-space: nowrap; }
+.ohlc-strip b { color: #bac7d2; font-weight: 500; }
+.ohlc-strip .ohlc-symbol { color: #87ccdf; font-weight: 700; }
+.ohlc-strip b.positive { color: #63d49f; }
+.ohlc-strip b.negative { color: #f27e80; }
+.chart-tools { gap: 12px; color: #8495a6; font-size: 9px; }
+.crosshair-time { min-width: 175px; color: #9eb0c0; font: 9px ui-monospace, monospace; text-align: right; }
+.chart-layout { display: grid; grid-template-columns: minmax(0, 1fr); align-items: start; }
+.chart-panels { min-width: 0; }
+.chart-panel { border-bottom: 1px solid #1d2731; }
+.chart-panel[hidden] { display: none; }
+.panel-heading { height: 22px; justify-content: space-between; padding: 0 11px; color: #708295; font: 600 8px ui-monospace, monospace; letter-spacing: .09em; }
+.panel-heading span:last-child { color: #586a7b; font-weight: 400; letter-spacing: 0; }
+.price-panel .canvas-wrap { height: min(52vh, 520px); min-height: 320px; }
+.small-panel .canvas-wrap { height: 92px; min-height: 75px; }
+.research-panel .canvas-wrap { height: 118px; }
+.canvas-wrap { position: relative; width: 100%; }
+.canvas-wrap > canvas:first-child { display: block; width: 100% !important; height: 100% !important; }
+.canvas-wrap > canvas.chart-overlay { position: absolute; inset: 0; z-index: 2; width: 100% !important; height: 100% !important; pointer-events: none; }
+.trade-inspector { position: sticky; bottom: 0; z-index: 5; border-top: 1px solid #334452; background: #111a23; padding: 10px 14px 12px; }
+.trade-inspector[hidden] { display: none; }
+.inspector-heading { justify-content: space-between; margin-bottom: 8px; }
+.inspector-heading > div { display: flex; align-items: baseline; gap: 10px; }
+.inspector-heading b { color: #dbe5ed; font: 600 11px ui-monospace, monospace; }
+.inspector-heading button { border: 0; background: none; color: #8293a3; font-size: 18px; cursor: pointer; }
+.trade-inspector dl { display: grid; grid-template-columns: repeat(7, minmax(90px, 1fr)); gap: 8px 15px; margin: 0; }
+.trade-inspector dt { color: #738598; font-size: 9px; }
+.trade-inspector dd { margin: 3px 0 0; color: #d0dbe4; font: 10px ui-monospace, monospace; }
+.trade-inspector dd.positive { color: #63d49f; }
+.trade-inspector dd.negative { color: #f27e80; }
+.chart-footer { min-height: 27px; justify-content: space-between; gap: 10px; color: #657689; padding: 0 11px; font-size: 9px; }
+.chart-footer span:last-child { text-align: right; }
+.data-import-dock { gap: 8px; min-height: 33px; margin-top: 9px; border: 1px solid #222d37; border-radius: 4px; background: #0d131a; padding: 0 10px; color: #90a1b0; font-size: 9px; }
+.dock-indicator { width: 6px; height: 6px; border-radius: 50%; background: #4bbd8a; box-shadow: 0 0 8px #4bbd8a60; }
+.dock-muted { color: #586a7a; }
+.dock-status { margin-left: auto; color: #778999; }
+.dock-status[data-kind="error"] { color: #f27e80; }
+.dock-status[data-kind="success"] { color: #63d49f; }
+@media (max-width: 1050px) {
+    .terminal-header { padding: 0 15px; }
+    .research-main { padding: 12px 14px 20px; }
+    .chart-toolbar { gap: 6px; }
+    .toolbar-overflow { display: none; position: absolute; z-index: 9; right: 10px; top: 42px; align-items: flex-start; flex-direction: column; gap: 11px; border: 1px solid #2b3945; border-radius: 4px; background: #111a23; padding: 12px; box-shadow: 0 10px 30px #0009; }
+    .toolbar-overflow.menu-open { display: flex; }
+    .mobile-menu { display: inline-block; margin-left: auto; }
+    .toolbar-spacer { margin-left: auto; }
+    .chart-toolbar { position: relative; }
+}
+@media (max-width: 700px) {
+    .terminal-header { min-height: auto; align-items: flex-start; flex-direction: column; gap: 9px; padding: 9px 12px; }
+    .brand-lockup { min-width: 0; }
+    .header-actions { width: 100%; justify-content: space-between; }
+    .import-form { flex-wrap: wrap; }
+    .file-name { display: none; }
+    .research-main { padding: 9px 7px 15px; }
+    .workspace-heading { align-items: flex-start; flex-wrap: wrap; gap: 8px; }
+    .dataset-meta { width: 100%; justify-content: space-between; gap: 7px; }
+    .dataset-meta span:nth-child(2) { display: none; }
+    .chart-toolbar { gap: 4px; padding: 5px; }
+    .toolbar-select { display: none; }
+    .chart-toolbar .timeframe-button { min-width: 30px; padding: 0 5px; }
+    .count-control { font-size: 0; }
+    .count-control input { width: 53px; }
+    .chart-subtoolbar { align-items: flex-start; flex-direction: column; gap: 5px; padding: 6px 8px; }
+    .ohlc-strip { gap: 5px 9px; }
+    .chart-tools { width: 100%; justify-content: space-between; gap: 5px; }
+    .price-panel .canvas-wrap { height: 54vh; min-height: 300px; }
+    .chart-footer { align-items: flex-start; flex-direction: column; justify-content: center; gap: 2px; padding: 5px 9px; }
+    .chart-footer span:last-child { text-align: left; }
+    .trade-inspector dl { grid-template-columns: repeat(3, minmax(80px, 1fr)); }
+}

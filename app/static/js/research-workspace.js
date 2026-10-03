@@ -1,8 +1,10 @@
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
-  const form = $("research-form"), state = { ids: [], sensitivityIds: [], correlationIds: [], baselineId: null, chart: null, advancedChart: null };
+  const form = $("research-form"), state = { ids: [], sensitivityIds: [], sensitivityParameters: [], correlationIds: [], baselineId: null, monteCarloId: null, chart: null, advancedChart: null, researchBusy: false, advancedBusy: false, results: [], selectedExperimentId: null };
+  let strategySchema = [];
   const fmt = value => value == null ? "—" : new Intl.NumberFormat(undefined,{maximumFractionDigits:4}).format(value);
+  const tradeFmt = value => value == null ? "—" : new Intl.NumberFormat(undefined,{maximumFractionDigits:12}).format(value);
   async function request(path, body) {
     const response = await fetch("/api/research" + path, body ? {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)} : {});
     const data = await response.json();
@@ -16,17 +18,99 @@
   }
   function status(message, error=false) { $("api-status").textContent=message; $("api-status").className=error?"status-error":"status-ok"; }
   function error(message) { $("error").textContent=message; $("error").hidden=!message; }
+  function syncAdvancedButtons() {
+    const busy=state.researchBusy||state.advancedBusy;
+    $("run-sensitivity").disabled=busy||state.sensitivityIds.length<2||!state.sensitivityParameters.length;
+    $("run-correlation").disabled=busy||state.correlationIds.length<2;
+    $("run-portfolio").disabled=busy||state.correlationIds.length<2;
+    $("run-robustness").disabled=busy||!state.baselineId;
+    $("run-regime").disabled=busy||!state.baselineId;
+    $("run-mc").disabled=busy||!state.monteCarloId;
+  }
   function updateMode() {
     const mode=$("mode").value;
     $("single-parameters").hidden=mode!=="single"; $("space-parameters").hidden=mode==="single";
+    $("parameter-empty").hidden=strategySchema.length>0;
     $("search-config").hidden=mode==="single"; $("split-config").hidden=mode!=="oos"; $("walk-config").hidden=mode!=="walk_forward";
     $("run-button").textContent={single:"Run single backtest",batch:"Run parameter batch",oos:"Select on train → evaluate OOS",walk_forward:"Run walk-forward"}[mode];
+  }
+  function valueControl(definition, value, role) {
+    const input=document.createElement(definition.kind==="choice"?"select":"input");
+    input.dataset.role=role;
+    if(definition.kind==="choice"){
+      for(const choice of definition.choices||[]){const option=document.createElement("option");option.value=String(choice);option.textContent=String(choice);input.append(option);}
+      input.value=String(value ?? definition.choices?.[0] ?? "");
+    }else if(definition.kind==="boolean"){
+      for(const choice of [true,false]){const option=document.createElement("option");option.value=String(choice);option.textContent=String(choice);input.append(option);}
+      input.value=String(value ?? false);
+    }else{
+      input.type=definition.kind==="integer"||definition.kind==="float"?"number":"text";
+      if(definition.kind==="integer"){input.step=String(definition.step||1);if(definition.minimum!=null)input.min=String(definition.minimum);if(definition.maximum!=null)input.max=String(definition.maximum);}
+      if(definition.kind==="float"){input.step="any";if(definition.minimum!=null)input.min=String(definition.minimum);if(definition.maximum!=null)input.max=String(definition.maximum);}
+      input.value=value ?? definition.default ?? "";
+    }
+    return input;
+  }
+  function renderStrategyParameters(strategy) {
+    strategySchema=Array.isArray(strategy?.parameters)?strategy.parameters:[];
+    const single=$("single-parameters"), batch=$("space-parameters");
+    for(const container of [single,batch]) container.replaceChildren();
+    $("parameter-empty").hidden=strategySchema.length>0;
+    for(const definition of strategySchema){
+      const label=definition.label||definition.name.replaceAll("_"," ");
+      const one=document.createElement("label");one.dataset.parameter=definition.name;one.textContent=label;
+      one.append(valueControl(definition,definition.default,"value"));single.append(one);
+      const group=document.createElement("fieldset");group.className="strategy-parameter";group.dataset.parameter=definition.name;
+      const legend=document.createElement("legend");legend.textContent=label;group.append(legend);
+      const fixedLabel=document.createElement("label");fixedLabel.textContent="Fixed value";
+      fixedLabel.append(valueControl(definition,definition.default,"value"));group.append(fixedLabel);
+      const optimizeLabel=document.createElement("label");optimizeLabel.className="parameter-vary";
+      const optimize=document.createElement("input");optimize.type="checkbox";optimize.dataset.role="optimize";
+      optimizeLabel.append(optimize,document.createTextNode(" Vary in research"));group.append(optimizeLabel);
+      if(definition.kind==="integer"||definition.kind==="float"){
+        const range=document.createElement("div");range.className="range parameter-range";range.hidden=true;range.dataset.role="range";
+        for(const [key,title,initial] of [["minimum","Minimum",definition.minimum??definition.default],["maximum","Maximum",definition.maximum??definition.default],["step","Step",definition.step??(definition.kind==="integer"?1:0.1)]]){
+          const controlLabel=document.createElement("label");controlLabel.textContent=title;
+          const control=document.createElement("input");control.type="number";control.step=key==="step"&&definition.kind==="float"?"any":String(definition.step||1);control.dataset.role=key;control.value=String(initial);
+          if(key!=="step"&&definition.minimum!=null)control.min=String(definition.minimum);
+          if(key!=="step"&&definition.maximum!=null)control.max=String(definition.maximum);
+          controlLabel.append(control);range.append(controlLabel);
+        }
+        group.append(range);
+      }else if(definition.kind==="choice"){
+        const choices=document.createElement("div");choices.hidden=true;choices.dataset.role="choices";
+        for(const choice of definition.choices||[]){const choiceLabel=document.createElement("label");const checkbox=document.createElement("input");checkbox.type="checkbox";checkbox.value=String(choice);checkbox.dataset.role="choice";choiceLabel.append(checkbox,document.createTextNode(` ${choice}`));choices.append(choiceLabel);}
+        group.append(choices);
+      }else{optimize.disabled=true;}
+      optimize.addEventListener("change",()=>{const range=group.querySelector('[data-role="range"]'),choices=group.querySelector('[data-role="choices"]');if(range)range.hidden=!optimize.checked;if(choices)choices.hidden=!optimize.checked;});
+      batch.append(group);
+    }
+    updateMode();
+  }
+  function readParameterValues(container, searching) {
+    const values={};
+    for(const definition of strategySchema){
+      const group=[...container.querySelectorAll("[data-parameter]")].find(item=>item.dataset.parameter===definition.name);
+      if(searching&&!group)throw new Error(`Missing controls for strategy parameter ${definition.name}`);
+      const owner=group;
+      const control=owner?.querySelector('[data-role="value"]');
+      const raw={value:control.value};
+      if(searching){
+        const vary=owner.querySelector('[data-role="optimize"]');raw.optimize=!!vary?.checked;
+        if(raw.optimize&&(definition.kind==="integer"||definition.kind==="float"))for(const key of ["minimum","maximum","step"])raw[key]=owner.querySelector(`[data-role="${key}"]`).value;
+        if(raw.optimize&&definition.kind==="choice")raw.choices=[...owner.querySelectorAll('[data-role="choice"]:checked')].map(item=>item.value);
+      }
+      values[definition.name]=raw;
+    }
+    return values;
   }
   async function loadCatalog() {
     try {
       const strategies=await request("/strategies");
       $("strategy").replaceChildren(...strategies.map(item=>{const option=document.createElement("option");option.value=item.id;option.textContent=item.id+" · v"+item.version;return option;}));
       if(!strategies.length) throw new Error("No strategies are registered.");
+      $("strategy")._researchStrategies=strategies;
+      renderStrategyParameters(strategies[0]);
       const response=await fetch("/instruments"); const instruments=await response.json();
       if(!response.ok) throw new Error("Unable to load instruments.");
       $("symbol").replaceChildren(...instruments.map(item=>{const option=document.createElement("option");option.value=item.symbol;option.textContent=item.symbol;return option;}));
@@ -52,7 +136,6 @@
     const boundary=cut.toISOString().slice(0,16);
     form.elements.training_start.value=start;form.elements.training_end.value=boundary;
     form.elements.testing_start.value=boundary;form.elements.testing_end.value=end;}
-  function range(name,prefix) { return {name:name,kind:"integer",minimum:Number(form.elements[prefix+"_min"].value),maximum:Number(form.elements[prefix+"_max"].value),step:Number(form.elements[prefix+"_step"].value)}; }
   function payload() {
     const fields=new FormData(form), mode=fields.get("mode");
     const body={mode:mode,strategy_id:fields.get("strategy_id"),symbol:fields.get("symbol"),timeframe:fields.get("timeframe"),start:fields.get("start"),end:fields.get("end"),
@@ -60,9 +143,15 @@
       commission_rate:Number(fields.get("commission_rate")),spread_scale:Number(fields.get("spread_scale")),slippage:Number(fields.get("slippage"))};
     body.risk_free_rate=Number(fields.get("risk_free_rate"));body.target_return=Number(fields.get("target_return"));
     if(fields.get("periods_per_year"))body.periods_per_year=Number(fields.get("periods_per_year"));
-    if(mode==="single"){body.parameters={fast_period:Number(fields.get("fast_period")),slow_period:Number(fields.get("slow_period"))};return body;}
-    body.parameter_space=[range("fast_period","fast"),range("slow_period","slow")];
-    body.search_method=fields.get("search_method");body.count=Number(fields.get("count"));body.seed=Number(fields.get("seed"));
+    const parameters=ResearchParameters.makePayload(strategySchema,readParameterValues($("single-parameters"),false),false);
+    if(mode==="single"){body.parameters=parameters.parameters;return body;}
+    const search=ResearchParameters.makePayload(strategySchema,readParameterValues($("space-parameters"),true),true);
+    body.parameter_space=search.parameter_space;
+    if(!search.parameter_space.some(item=>item.kind!=="fixed")){
+      body.search_method="grid";body.count=1;
+    }else{
+      body.search_method=fields.get("search_method");body.count=Number(fields.get("count"));body.seed=Number(fields.get("seed"));
+    }
     if(mode==="oos"||mode==="walk_forward"){body.selection_metric=fields.get("selection_metric");body.maximize=fields.get("maximize")==="true";body.top_n=Number(fields.get("top_n"));}
     if(mode==="oos") for(const key of ["training_start","training_end","testing_start","testing_end"]) body[key]=fields.get(key);
     if(mode==="walk_forward"){body.training_days=Number(fields.get("training_days"));body.testing_days=Number(fields.get("testing_days"));body.step_days=Number(fields.get("step_days"));body.anchored=fields.get("anchored")==="true";}
@@ -76,41 +165,92 @@
     return [];
   }
   function renderChart(analysis) {
-    $("chart-empty").hidden=!!analysis?.equity_curve?.length;
-    if(!analysis?.equity_curve?.length)return;
+    const points=(analysis?.equity_curve||[]).map(item=>({x:new Date(item.timestamp),y:item.equity}));
+    $("chart-empty").hidden=points.length>0;
     if(state.chart)state.chart.destroy();
-    const points=analysis.equity_curve.map(item=>({x:new Date(item.timestamp),y:item.equity}));
     state.chart=new Chart($("equity-chart"),{type:"line",data:{datasets:[{label:"Equity",data:points,borderColor:"#58bad1",backgroundColor:"#58bad122",pointRadius:0,borderWidth:1.5,fill:true}]},
       options:{responsive:true,maintainAspectRatio:false,animation:false,parsing:false,plugins:{legend:{display:false}},
         scales:{x:{type:"time",time:{unit:"day"},ticks:{color:"#748798",maxTicksLimit:8},grid:{color:"#24313b"}},
           y:{ticks:{color:"#748798"},grid:{color:"#24313b"}}}}});
   }
+  function renderTradeHistory(row) {
+    const body=$("trade-records");body.replaceChildren();
+    const result=row?.backtest_result;
+    const trades=result?TradeHistory.tradesFromBacktest(result):[];
+    $("trade-empty").hidden=trades.length>0;
+    $("inspect-trades").disabled=!result||trades.length===0;
+    $("trade-result-context").textContent=row
+      ? `${row.definition.phase.toUpperCase()} · ${row.definition.symbol} ${row.definition.timeframe} · ${row.definition.experiment_id}`
+      : "Select a completed experiment to inspect its trades.";
+    body.replaceChildren(...trades.map(trade=>{
+      const tr=document.createElement("tr");tr.dataset.tradeId=String(trade.id);
+      const duration=Math.max(0,trade.duration_ms),mins=Math.floor(duration/60000),days=Math.floor(mins/1440),hours=Math.floor((mins%1440)/60);
+      const durationText=days?`${days}d ${hours}h`:hours?`${hours}h ${mins%60}m`:`${mins}m`;
+      const values=[trade.id,trade.side,new Date(trade.entry_time).toLocaleString(),new Date(trade.exit_time).toLocaleString(),tradeFmt(trade.entry_price),tradeFmt(trade.exit_price),tradeFmt(trade.quantity),tradeFmt(trade.gross_pnl),tradeFmt(trade.net_pnl),tradeFmt(trade.commission),durationText];
+      for(const value of values){const td=document.createElement("td");td.textContent=value??"—";tr.append(td);}
+      const action=document.createElement("td"),inspect=document.createElement("button");inspect.type="button";inspect.textContent="Chart";inspect.setAttribute("aria-label",`Show trade ${trade.id} on price chart`);
+      inspect.addEventListener("click",()=>openPriceChart(row,trade));action.append(inspect);tr.append(action);
+      return tr;
+    }));
+  }
+  function selectExperiment(id) {
+    state.selectedExperimentId=id;
+    const row=TradeHistory.resultForId(state.results,id);
+    for(const tr of $("records").rows)tr.classList.toggle("selected-result",tr.dataset.experimentId===id);
+    const analysis=row?.analysis_result;
+    const metrics={"Selected total return":analysis?.total_return==null?"—":`${(analysis.total_return*100).toFixed(2)}%`,
+      "Net trade P&L":fmt(analysis?.trades?.net_profit),"Trades":analysis?.trades?.total_trades??"—",
+      "Win rate":analysis?.trades?.win_rate==null?"—":`${(analysis.trades.win_rate*100).toFixed(2)}%`,
+      "Profit factor":fmt(analysis?.trades?.profit_factor),"Expectancy":fmt(analysis?.trades?.expectancy),
+      "Max drawdown":analysis?.drawdown?.max_drawdown_pct==null?"—":`${(analysis.drawdown.max_drawdown_pct*100).toFixed(2)}%`,
+      "Period volatility":fmt(analysis?.risk?.period_volatility),"Sharpe":fmt(analysis?.risk?.sharpe_ratio),
+      "Sortino":fmt(analysis?.risk?.sortino_ratio),"Calmar":fmt(analysis?.risk?.calmar_ratio)};
+    for(const card of $("summary").querySelectorAll(".metric")){const label=card.querySelector("small").textContent;if(label in metrics)card.querySelector("b").textContent=metrics[label];}
+    renderChart(row?.analysis_result||null);renderTradeHistory(row||null);
+  }
+  function openPriceChart(row, trade) {
+    if(!row?.backtest_result||!trade)return;
+    try{
+      sessionStorage.setItem("marketResearch.selectedBacktest",JSON.stringify({
+        symbol:row.definition.symbol,timeframe:row.definition.timeframe,center_timestamp:trade.entry_time,
+        backtest_result:{orders:row.backtest_result.orders||[],trades:row.backtest_result.trades||[],equity_curve:[],open_position:row.backtest_result.open_position||null}
+      }));
+      window.location.assign("/");
+    }catch(reason){error(`Unable to open the selected trade chart: ${reason.message||"session storage is unavailable"}`);}
+  }
   function render(result) {
     if(state.advancedChart){state.advancedChart.destroy();state.advancedChart=null;}
     $("advanced-output").replaceChildren();$("advanced-output").hidden=true;
-    const rows=flatten(result); state.ids=rows.filter(row=>row.status==="completed").map(row=>row.definition.experiment_id);
+    const rows=flatten(result); state.results=rows; state.ids=rows.filter(row=>row.status==="completed").map(row=>row.definition.experiment_id);
     state.sensitivityIds=ResearchWorkspaceState.sensitivityGroup(rows)
       .map(row=>row.definition.experiment_id);
+    state.sensitivityParameters=ResearchWorkspaceState.sensitivityParameters(
+      ResearchWorkspaceState.sensitivityGroup(rows));
     state.correlationIds=ResearchWorkspaceState.alignedCorrelationGroup(rows)
       .map(row=>row.definition.experiment_id);
-    $("run-correlation").disabled=state.correlationIds.length<2;
     $("correlation-hint").textContent=state.correlationIds.length>=2
       ? `${state.correlationIds.length} aligned ${state.correlationIds[0]&&rows.find(row=>row.definition.experiment_id===state.correlationIds[0]).definition.phase.toUpperCase()} return series`
       : "Correlation needs at least two completed results from the same phase and data period.";
-    $("run-sensitivity").disabled=state.sensitivityIds.length<2;
     $("sensitivity-hint").textContent=state.sensitivityIds.length>=2
-      ? `${state.sensitivityIds.length} comparable ${rows.find(row=>row.definition.experiment_id===state.sensitivityIds[0]).definition.phase.toUpperCase()} configurations`
+      ? state.sensitivityParameters.length
+        ? `${state.sensitivityIds.length} comparable configurations · varying: ${state.sensitivityParameters.join(", ")}`
+        : "Selected configurations do not vary any shared parameter."
       : "Sensitivity needs multiple completed parameter configurations in one training or batch period.";
-    $("run-portfolio").disabled=state.correlationIds.length<2;
     $("portfolio-hint").textContent=state.correlationIds.length>=2
       ? `${state.correlationIds.length} aligned series will receive equal weights.`
       : "Portfolio curve needs at least two completed aligned results.";
+    const correlationRow=rows.find(row=>row.definition.experiment_id===state.correlationIds[0]);
+    state.portfolioInitialCapital=correlationRow?.definition.backtest_config?.initial_cash;
     const oosRow=rows.find(row=>row.definition.phase==="oos"&&row.status==="completed"&&row.analysis_result);
     state.baselineId=oosRow?.definition.experiment_id||state.sensitivityIds[0]||state.ids[0]||null;
-    $("run-robustness").disabled=!state.baselineId;
-    $("run-mc").disabled=!state.baselineId;
-    $("run-regime").disabled=!state.baselineId;
-    const analysis=oosRow?.analysis_result||rows.find(row=>row.analysis_result)?.analysis_result;
+    state.monteCarloId=ResearchWorkspaceState.monteCarloBaseline(rows,state.baselineId)?.definition.experiment_id||null;
+    syncAdvancedButtons();
+    $("mc-hint").textContent=state.monteCarloId
+      ? "Uses closed trades from the selected completed result."
+      : "Trade bootstrap needs at least one completed trade and no open position.";
+    const firstCompleted=rows.find(row=>row.status==="completed");
+    state.selectedExperimentId=firstCompleted?.definition.experiment_id||null;
+    const analysis=firstCompleted?.analysis_result;
     const walk=result.walk_forward||result;
     $("result-title").textContent=result.training?"Training and OOS evaluation":walk.windows?walk.windows.length+" walk-forward windows":"Backtest / batch results";
     const completed=rows.filter(row=>row.status==="completed").length, failed=rows.length-completed, summary=$("summary");
@@ -118,7 +258,7 @@
     const cards=[["Experiments",rows.length],["Completed",completed],["Failed",failed],
       ["OOS evaluated",rows.filter(row=>row.definition.phase==="oos"&&row.status==="completed").length],
       ["Selection metric",result.selection_rule?.metric||"—"],["Selected",result.selected?.length??"—"],
-      [oosRow?"OOS total return":"Batch representative return",analysis?.total_return==null?"—":(analysis.total_return*100).toFixed(2)+"%"],
+      ["Selected total return",analysis?.total_return==null?"—":(analysis.total_return*100).toFixed(2)+"%"],
       ["Net trade P&L",fmt(analysis?.trades?.net_profit)],["Trades",analysis?.trades?.total_trades??"—"],
       ["Win rate",analysis?.trades?.win_rate==null?"—":(analysis.trades.win_rate*100).toFixed(2)+"%"],
       ["Profit factor",fmt(analysis?.trades?.profit_factor)],["Expectancy",fmt(analysis?.trades?.expectancy)],
@@ -129,28 +269,47 @@
         ["WF completed windows",result.aggregate.completed_window_count]]:[])];
     summary.replaceChildren(...cards.map(pair=>{const box=document.createElement("div");box.className="metric";const small=document.createElement("small");small.textContent=pair[0];const value=document.createElement("b");value.textContent=pair[1];box.append(small,value);return box;}));
     const tbody=$("records");
-    tbody.replaceChildren(...rows.map(row=>{const d=row.definition,a=row.analysis_result,tr=document.createElement("tr");tr.dataset.phase=d.phase;
+    tbody.replaceChildren(...rows.map(row=>{const d=row.definition,a=row.analysis_result,tr=document.createElement("tr");tr.dataset.phase=d.phase;tr.dataset.experimentId=d.experiment_id;tr.tabIndex=row.status==="completed"?0:-1;
       const data=[d.phase.toUpperCase(),row.status,JSON.stringify(Object.fromEntries(d.parameters.values)),fmt(a?.total_return),fmt(a?.trades?.net_profit),fmt(a?.trades?.total_trades),d.experiment_id.slice(0,12),row.failure?(row.failure.exception_type+": "+row.failure.message):"—"];
       for(const value of data){const cell=document.createElement("td");cell.textContent=value;tr.append(cell);}
-      if(row.status==="failed")tr.title=(row.failure?.exception_type||"Failure")+": "+(row.failure?.message||"");return tr;}));
-    renderChart(analysis);$("advanced-tools").hidden=!state.ids.length;
+      if(row.status==="failed")tr.title=(row.failure?.exception_type||"Failure")+": "+(row.failure?.message||"");
+      if(row.status==="completed"){
+        tr.setAttribute("role","button");
+        tr.addEventListener("click",()=>selectExperiment(d.experiment_id));
+        tr.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();selectExperiment(d.experiment_id);}});
+      }
+      return tr;}));
+    if(state.selectedExperimentId)selectExperiment(state.selectedExperimentId);else{renderChart(null);renderTradeHistory(null);}
+    $("advanced-tools").hidden=!state.ids.length;
   }
-  form.addEventListener("submit",async event=>{event.preventDefault();error("");const button=$("run-button");button.disabled=true;button.textContent="Running…";
+  form.addEventListener("submit",async event=>{event.preventDefault();if(state.advancedBusy)return;error("");const button=$("run-button");state.researchBusy=true;button.disabled=true;button.textContent="Running…";syncAdvancedButtons();$("clear-results").disabled=true;
     try{render(await request("/run",payload()));status("Research run completed");}
-    catch(reason){error(reason.message);status("Research run failed",true);}
-    finally{button.disabled=false;updateMode();}});
+    catch(reason){error(reason.message);status("Research run failed",true);if(state.ids.length)$("result-title").textContent="Previous results · new run failed";}
+    finally{state.researchBusy=false;button.disabled=false;$("clear-results").disabled=false;syncAdvancedButtons();updateMode();}});
   $("mode").addEventListener("change",()=>{updateMode();initializeSplit();});
+  $("strategy").addEventListener("change",event=>{
+    const strategies=event.currentTarget._researchStrategies||[];
+    renderStrategyParameters(strategies.find(item=>item.id===event.currentTarget.value));
+  });
   $("symbol").addEventListener("change",()=>loadRange().catch(reason=>error(reason.message)));
-  $("clear-results").addEventListener("click",()=>{state.ids=[];state.sensitivityIds=[];state.correlationIds=[];state.baselineId=null;
+  $("clear-results").addEventListener("click",()=>{state.ids=[];state.sensitivityIds=[];state.sensitivityParameters=[];state.correlationIds=[];state.baselineId=null;state.monteCarloId=null;state.results=[];state.selectedExperimentId=null;
     for(const id of ["run-sensitivity","run-robustness","run-correlation","run-portfolio","run-mc","run-regime"])
       $(id).disabled=true;
     $("sensitivity-hint").textContent="Sensitivity needs multiple completed parameter configurations in one training or batch period.";
+    $("mc-hint").textContent="Trade bootstrap needs at least one completed trade and no open position.";
     $("correlation-hint").textContent="Correlation needs at least two completed results from the same phase and data period.";
     $("portfolio-hint").textContent="Portfolio curve needs at least two completed aligned results.";
     if(state.advancedChart){state.advancedChart.destroy();state.advancedChart=null;}
     if(state.chart){state.chart.destroy();state.chart=null;}
     $("records").replaceChildren();$("summary").hidden=true;$("advanced-tools").hidden=true;$("chart-empty").hidden=false;
+    renderChart(null);renderTradeHistory(null);
     $("result-title").textContent="No experiment loaded";$("advanced-output").hidden=true;});
+  $("inspect-trades").addEventListener("click",()=>{
+    const row=TradeHistory.resultForId(state.results,state.selectedExperimentId);
+    if(!row?.backtest_result)return;
+    const trade=TradeHistory.tradesFromBacktest(row.backtest_result)[0];if(!trade)return;
+    openPriceChart(row,trade);
+  });
   function renderAdvanced(result){
     const out=$("advanced-output"),view=ResearchPresentation.advancedView(result);
     if(state.advancedChart){state.advancedChart.destroy();state.advancedChart=null;}
@@ -198,31 +357,32 @@
     const notice=document.createElement("p");notice.className="advanced-error";notice.setAttribute("role","alert");
     notice.textContent=message;out.append(notice);
   }
-  async function advanced(path,body,button){const out=$("advanced-output");out.hidden=false;out.textContent="Running analysis…";
-    if(button)button.disabled=true;
+  async function advanced(path,body){if(state.advancedBusy||state.researchBusy)return;state.advancedBusy=true;syncAdvancedButtons();$("clear-results").disabled=true;const out=$("advanced-output");out.hidden=false;out.textContent="Running analysis…";
     try{renderAdvanced(await request(path,body));}
     catch(reason){renderAdvancedError(reason.message);}
-    finally{if(button)button.disabled=false;}}
+    finally{state.advancedBusy=false;$("clear-results").disabled=false;syncAdvancedButtons();}}
   $("run-sensitivity").addEventListener("click",()=>advanced("/advanced/sensitivity",{experiment_ids:state.sensitivityIds,
-    metric:$("advanced-metric").value,parameters:["fast_period","slow_period"]},$("run-sensitivity")));
+    metric:$("advanced-metric").value,parameters:state.sensitivityParameters}));
   $("run-robustness").addEventListener("click",()=>advanced("/advanced/robustness",{experiment_id:state.baselineId,
     metric:$("advanced-metric").value,scenarios:[
       {name:"commission plus 0.1 per unit",commission_per_unit_addition:0.1},
       {name:"spread scale doubled",spread_multiplier:2},
       {name:"slippage doubled",slippage_multiplier:2,slippage_addition:0.0001}
-    ]},$("run-robustness")));
+    ]}));
   $("run-correlation").addEventListener("click",()=>{
+    if(state.researchBusy||state.advancedBusy)return;
     if(state.correlationIds.length<2)return;
-    advanced("/advanced/correlation",{experiment_ids:state.correlationIds},$("run-correlation"));
+    advanced("/advanced/correlation",{experiment_ids:state.correlationIds});
   });
   $("run-portfolio").addEventListener("click",()=>{
+    if(state.researchBusy||state.advancedBusy)return;
     const aligned=state.correlationIds;if(aligned.length<2)return;const weights={};
     for(const id of aligned)weights[id]=1/aligned.length;
     advanced("/advanced/portfolio",{experiment_ids:aligned,weights:weights,
-      initial_capital:Number(form.elements.initial_cash.value)},$("run-portfolio"));});
-  $("run-mc").addEventListener("click",()=>advanced("/advanced/monte-carlo",{experiment_id:state.baselineId,
-    simulations:Number($("mc-count").value),seed:Number($("mc-seed").value),method:"bootstrap"},$("run-mc")));
+      initial_capital:state.portfolioInitialCapital});});
+  $("run-mc").addEventListener("click",()=>advanced("/advanced/monte-carlo",{experiment_id:state.monteCarloId,
+    simulations:Number($("mc-count").value),seed:Number($("mc-seed").value),method:"bootstrap"}));
   $("run-regime").addEventListener("click",()=>advanced("/advanced/regimes",{experiment_id:state.baselineId,
-    lookback:Number($("regime-lookback").value),volatility_threshold:Number($("regime-threshold").value)},$("run-regime")));
+    lookback:Number($("regime-lookback").value),volatility_threshold:Number($("regime-threshold").value)}));
   updateMode();loadCatalog();
 })();
