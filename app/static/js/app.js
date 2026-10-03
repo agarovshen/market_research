@@ -16,6 +16,7 @@ const priceRange=document.getElementById("price-range");
 const rangeSlider=document.getElementById("range-slider");
 const rangeValue=document.getElementById("range-value");
 let marketData=[];
+const importLock=MarketDataImportLock.createImportLock();
 let priceChart=null;
 let returnChart=null;
 let volumeChart=null;
@@ -335,20 +336,25 @@ form.addEventListener("submit",async event=>{
         setStatus("Select a CSV dataset first.","warning");
         return;
     }
+    if(!importLock.tryStart())return;
     button.disabled=true;
-    button.textContent="Processing...";
+    button.textContent="Importing…";
     setStatus("Importing historical dataset...","info");
     try{
         const formData=new FormData();
         formData.append("csv_file",file);
         const response=await fetch("/import-csv",{method:"POST",body:formData});
-        const data=await response.json();
+        const responseText=await response.text();
+        let data;
+        try{data=responseText?JSON.parse(responseText):{};}
+        catch{throw new Error(response.ok?"Server returned an invalid import response.":responseText||`Import failed (HTTP ${response.status}).`);}
         if(!response.ok)throw new Error(data.detail||data.message||"Import failed.");
-        setStatus(data.message,data.imported===false?"warning":"success");
-        if(data.imported!==false)await loadMarketData(data.symbol,timeframe.value,5000);
+        setStatus(data.message||"Import completed.",data.rows_inserted===0?"warning":"success");
+        if(data.rows_inserted>0)await loadMarketData(data.symbol,timeframe.value,5000);
     }catch(error){
-        setStatus(error.message,"error");
+        setStatus(error.message||"Import failed.","error");
     }finally{
+        importLock.finish();
         button.disabled=false;
         button.textContent="Import";
     }

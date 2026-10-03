@@ -1,15 +1,18 @@
 from datetime import datetime,timedelta
-from fastapi import FastAPI,File,Request,UploadFile
+import logging
+from fastapi import FastAPI,File,HTTPException,Request,UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import desc,text
+from sqlalchemy.exc import SQLAlchemyError
 from app.database import SessionLocal
 from app.importer import get_symbol,import_mt5_csv
 from app.models import Instrument,MarketData
 from app.schemas import InstrumentCreate,InstrumentResponse
 from app.research.api import router as research_router
 app=FastAPI()
+logger=logging.getLogger(__name__)
 app.include_router(research_router)
 templates=Jinja2Templates(directory="app/templates")
 app.mount("/static",StaticFiles(directory="app/static"),name="static")
@@ -24,9 +27,19 @@ def import_csv(csv_file:UploadFile=File(...)):
     db=SessionLocal()
     try:
         symbol=get_symbol(csv_file.filename)
-        if db.query(Instrument).filter(Instrument.symbol==symbol).first():
-            return {"filename":csv_file.filename,"imported":False,"message":f"{symbol} already exists in database. Import stopped."}
-        return {"filename":csv_file.filename,"imported":True,"message":"CSV imported successfully",**import_mt5_csv(csv_file.file,csv_file.filename,db)}
+        result=import_mt5_csv(csv_file.file,csv_file.filename,db)
+        if result["already_complete"]:
+            message="No new data — all candles in the requested file range are already stored."
+        else:
+            message=f"Imported {result['rows_inserted']:,} candles; skipped {result['rows_skipped_existing']:,} already stored or duplicate candles."
+        return {"filename":csv_file.filename,"imported":True,"message":message,**result}
+    except ValueError as error:
+        db.rollback()
+        raise HTTPException(status_code=422,detail=str(error)) from error
+    except SQLAlchemyError as error:
+        db.rollback()
+        logger.exception("CSV market-data import failed")
+        raise HTTPException(status_code=500,detail="CSV import failed while writing market data.") from error
     finally:
         db.close()
 @app.get("/market-data")
