@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
-  const form = $("research-form"), state = { ids: [], sensitivityIds: [], baselineId: null, chart: null };
+  const form = $("research-form"), state = { ids: [], sensitivityIds: [], correlationIds: [], baselineId: null, chart: null };
   const fmt = value => value == null ? "—" : new Intl.NumberFormat(undefined,{maximumFractionDigits:4}).format(value);
   async function request(path, body) {
     const response = await fetch("/api/research" + path, body ? {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)} : {});
@@ -84,6 +84,12 @@
     const rows=flatten(result); state.ids=rows.filter(row=>row.status==="completed").map(row=>row.definition.experiment_id);
     state.sensitivityIds=rows.filter(row=>row.status==="completed"&&(row.definition.phase==="train"||row.definition.phase==="batch"))
       .map(row=>row.definition.experiment_id);
+    state.correlationIds=ResearchWorkspaceState.alignedCorrelationGroup(rows)
+      .map(row=>row.definition.experiment_id);
+    $("run-correlation").disabled=state.correlationIds.length<2;
+    $("correlation-hint").textContent=state.correlationIds.length>=2
+      ? `${state.correlationIds.length} aligned ${state.correlationIds[0]&&rows.find(row=>row.definition.experiment_id===state.correlationIds[0]).definition.phase.toUpperCase()} return series`
+      : "Correlation needs at least two completed results from the same phase and data period.";
     const oosRow=rows.find(row=>row.definition.phase==="oos"&&row.status==="completed"&&row.analysis_result);
     state.baselineId=oosRow?.definition.experiment_id||state.sensitivityIds[0]||state.ids[0]||null;
     const analysis=oosRow?.analysis_result||rows.find(row=>row.analysis_result)?.analysis_result;
@@ -117,7 +123,9 @@
     finally{button.disabled=false;updateMode();}});
   $("mode").addEventListener("change",()=>{updateMode();initializeSplit();});
   $("symbol").addEventListener("change",()=>loadRange().catch(reason=>error(reason.message)));
-  $("clear-results").addEventListener("click",()=>{state.ids=[];state.sensitivityIds=[];state.baselineId=null;if(state.chart){state.chart.destroy();state.chart=null;}
+  $("clear-results").addEventListener("click",()=>{state.ids=[];state.sensitivityIds=[];state.correlationIds=[];state.baselineId=null;
+    $("run-correlation").disabled=true;$("correlation-hint").textContent="Correlation needs at least two completed results from the same phase and data period.";
+    if(state.chart){state.chart.destroy();state.chart=null;}
     $("records").replaceChildren();$("summary").hidden=true;$("advanced-tools").hidden=true;$("chart-empty").hidden=false;
     $("result-title").textContent="No experiment loaded";$("advanced-output").hidden=true;});
   async function advanced(path,body){const out=$("advanced-output");out.hidden=false;out.textContent="Loading…";
@@ -130,7 +138,10 @@
       {name:"spread scale doubled",spread_multiplier:2},
       {name:"slippage doubled",slippage_multiplier:2,slippage_addition:0.0001}
     ]}));
-  $("run-correlation").addEventListener("click",()=>advanced("/advanced/correlation",{experiment_ids:state.sensitivityIds}));
+  $("run-correlation").addEventListener("click",()=>{
+    if(state.correlationIds.length<2)return;
+    advanced("/advanced/correlation",{experiment_ids:state.correlationIds});
+  });
   $("run-portfolio").addEventListener("click",()=>{const ids=state.sensitivityIds;
     if(!ids.length)return;const weights={};for(const id of ids)weights[id]=1/ids.length;
     advanced("/advanced/portfolio",{experiment_ids:ids,weights:weights,initial_capital:100000});});

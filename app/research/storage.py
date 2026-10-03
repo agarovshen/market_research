@@ -3,6 +3,7 @@
 from datetime import datetime
 
 from sqlalchemy import DateTime, JSON, String, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from app.database import Base
@@ -11,6 +12,31 @@ from app.research.models import ResearchResult
 from app.research.serialization import (
     decode_advanced_result, decode_result, encode_advanced_result, encode_result,
 )
+
+
+def _insert_if_absent(session: Session, model, identity_column, records: dict[str, tuple[object, dict]],
+                      identity_label: str) -> None:
+    """Insert idempotently, including the concurrent same-ID request race."""
+    if not records:
+        return
+    try:
+        # The pre-insert lookup is an optimization. The savepoint makes a unique
+        # conflict recoverable if another request inserts the same deterministic ID.
+        with session.begin_nested():
+            session.add_all(record for record, _ in records.values())
+            session.flush()
+    except IntegrityError as error:
+        existing = session.scalars(
+            select(model).where(identity_column.in_(tuple(records)))
+        ).all()
+        existing_by_id = {getattr(record, identity_label): record for record in existing}
+        if existing_by_id.keys() != records.keys():
+            raise
+        for identity, (_, payload) in records.items():
+            if existing_by_id[identity].payload != payload:
+                raise ValueError(
+                    f"{identity_label} collision with differing result: {identity}"
+                ) from error
 
 
 class ResearchExperimentRecord(Base):
@@ -54,21 +80,23 @@ class ResearchResultRepository:
             )
         ).all()
         existing_by_id = {record.experiment_id: record for record in existing}
+        inserts = {}
         for experiment_id, (result, payload) in pending.items():
             record = existing_by_id.get(experiment_id)
             if record is not None:
                 if record.payload != payload:
                     raise ValueError(f"Experiment identity collision with differing result: {experiment_id}")
                 continue
-            self.session.add(ResearchExperimentRecord(
+            inserts[experiment_id] = (ResearchExperimentRecord(
                 experiment_id=experiment_id,
                 strategy_id=result.definition.strategy_id,
                 symbol=result.definition.symbol,
                 timeframe=result.definition.timeframe,
                 status=result.status.value,
                 payload=payload,
-            ))
-        self.session.flush()
+            ), payload)
+        _insert_if_absent(self.session, ResearchExperimentRecord,
+                          ResearchExperimentRecord.experiment_id, inserts, "experiment_id")
 
     def get(self, experiment_id: str) -> ResearchResult | None:
         record = self.session.get(ResearchExperimentRecord, experiment_id)
@@ -106,9 +134,11 @@ class ResearchAnalysisRepository:
             if record.payload != payload:
                 raise ValueError(f"Advanced analysis identity collision: {result.analysis_id}")
             return
-        self.session.add(ResearchAnalysisRecord(
-            analysis_id=result.analysis_id, method=result.method, payload=payload))
-        self.session.flush()
+        _insert_if_absent(self.session, ResearchAnalysisRecord,
+                          ResearchAnalysisRecord.analysis_id,
+                          {result.analysis_id: (ResearchAnalysisRecord(
+                              analysis_id=result.analysis_id, method=result.method, payload=payload), payload)},
+                          "analysis_id")
 
     def get(self, analysis_id: str) -> AdvancedResearchResult | None:
         record = self.session.get(ResearchAnalysisRecord, analysis_id)

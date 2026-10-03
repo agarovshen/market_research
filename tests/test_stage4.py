@@ -334,6 +334,7 @@ class ResearchAPIIntegrationTests(unittest.TestCase):
                 "research.html").render(request=None)
             self.assertIn("Single backtest", html)
             self.assertIn("Training → OOS selection", html)
+            self.assertIn("correlation-hint", html)
             body = {
                 "mode": "single", "strategy_id": "moving_average.sma_crossover",
                 "symbol": "EURUSD", "timeframe": "M1",
@@ -353,6 +354,35 @@ class ResearchAPIIntegrationTests(unittest.TestCase):
             stored = ResearchResultRepository(session).get(identity)
             self.assertIsNotNone(stored)
             self.assertEqual(stored.status.value, "completed")
+
+            # Simulate two requests both observing an absent deterministic ID:
+            # the second INSERT must recover from the unique-key race via SAVEPOINT.
+            class EmptyRows:
+                def all(self):
+                    return []
+
+            class StaleFirstReadSession:
+                def __init__(self, wrapped):
+                    self.wrapped = wrapped
+                    self.first_read = True
+
+                def scalars(self, statement):
+                    if self.first_read:
+                        self.first_read = False
+                        return EmptyRows()
+                    return self.wrapped.scalars(statement)
+
+                def __getattr__(self, name):
+                    return getattr(self.wrapped, name)
+
+            ResearchResultRepository(StaleFirstReadSession(session)).save_many((stored,))
+            self.assertEqual(ResearchResultRepository(session).get(identity), stored)
+
+            from pydantic import ValidationError
+            from app.research.api import CorrelationRequest
+            with self.assertRaises(ValidationError):
+                CorrelationRequest(experiment_ids=[identity])
+
             invalid = dict(body, parameters={"fast_period": 5, "slow_period": 2})
             from fastapi import HTTPException
             with self.assertRaises(HTTPException) as rejected:
@@ -363,6 +393,24 @@ class ResearchAPIIntegrationTests(unittest.TestCase):
                 (("p50", 1000),), (("p50", 0),), (("p50", 0),), "fixture assumptions"))
             advanced_store = ResearchAnalysisRepository(session)
             advanced_store.save(advanced)
+            self.assertEqual(advanced_store.get(advanced.analysis_id), advanced)
+
+            class StaleFirstGetSession:
+                def __init__(self, wrapped):
+                    self.wrapped = wrapped
+                    self.first_read = True
+
+                def get(self, model, identity):
+                    if self.first_read:
+                        self.first_read = False
+                        return None
+                    return self.wrapped.get(model, identity)
+
+                def __getattr__(self, name):
+                    return getattr(self.wrapped, name)
+
+            # Advanced-analysis persistence uses the same race-safe insert policy.
+            ResearchAnalysisRepository(StaleFirstGetSession(session)).save(advanced)
             self.assertEqual(advanced_store.get(advanced.analysis_id), advanced)
 
 
