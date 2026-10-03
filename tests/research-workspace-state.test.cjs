@@ -1,6 +1,6 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
-const { alignedCorrelationGroup } = require("../app/static/js/research-state.js");
+const { alignedCorrelationGroup, sensitivityGroup } = require("../app/static/js/research-state.js");
 
 function row(id, phase = "batch", period = "2024-01-01", fingerprint = "same") {
   return {
@@ -43,4 +43,11 @@ test("failed and unanalyzed results are excluded from correlation input", () => 
   const incomplete = { ...row("b"), status: "failed" };
   const unanalyzed = { ...row("c"), analysis_result: null };
   assert.deepEqual(alignedCorrelationGroup([row("a"), incomplete, unanalyzed]), []);
+});
+
+test("sensitivity selects one compatible candidate phase/window instead of mixing walk-forward windows", () => {
+  const firstWindow = [row("train-1", "train", "2024-01-01"), row("train-2", "train", "2024-01-01")];
+  const secondWindow = [row("train-3", "train", "2024-02-01"), row("train-4", "train", "2024-02-01")];
+  assert.deepEqual(sensitivityGroup([...firstWindow, ...secondWindow]).map(item => item.definition.experiment_id),
+    ["train-1", "train-2"]);
 });

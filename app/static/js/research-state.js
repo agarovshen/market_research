@@ -6,7 +6,7 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
   "use strict";
 
-  function alignedCorrelationGroup(rows) {
+  function compatibleGroups(rows) {
     const groups = new Map();
     for (const row of rows) {
       if (row.status !== "completed" || !row.analysis_result) continue;
@@ -24,8 +24,11 @@
       groups.get(key).push(row);
     }
 
-    const phasePriority = { oos: 0, batch: 1, train: 2 };
-    const eligible = [...groups.values()].filter(group => group.length >= 2);
+    return [...groups.values()];
+  }
+
+  function preferredGroup(groups, phasePriority) {
+    const eligible = groups.filter(group => group.length >= 2);
     eligible.sort((left, right) =>
       (phasePriority[left[0].definition.phase] ?? 3) - (phasePriority[right[0].definition.phase] ?? 3) ||
       right.length - left.length ||
@@ -33,5 +36,16 @@
     return eligible[0] || [];
   }
 
-  return { alignedCorrelationGroup };
+  function alignedCorrelationGroup(rows) {
+    return preferredGroup(compatibleGroups(rows), { oos: 0, batch: 1, train: 2 });
+  }
+
+  function sensitivityGroup(rows) {
+    const groups = compatibleGroups(rows).filter(group =>
+      group.every(row => row.definition.strategy_id === group[0].definition.strategy_id &&
+        row.definition.strategy_version === group[0].definition.strategy_version));
+    return preferredGroup(groups, { batch: 0, train: 1 });
+  }
+
+  return { alignedCorrelationGroup, sensitivityGroup };
 });

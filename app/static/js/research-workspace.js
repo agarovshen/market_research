@@ -1,12 +1,17 @@
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
-  const form = $("research-form"), state = { ids: [], sensitivityIds: [], correlationIds: [], baselineId: null, chart: null };
+  const form = $("research-form"), state = { ids: [], sensitivityIds: [], correlationIds: [], baselineId: null, chart: null, advancedChart: null };
   const fmt = value => value == null ? "—" : new Intl.NumberFormat(undefined,{maximumFractionDigits:4}).format(value);
   async function request(path, body) {
     const response = await fetch("/api/research" + path, body ? {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)} : {});
     const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || "Request failed (" + response.status + ")");
+    if (!response.ok) {
+      const detail=data.detail;
+      const message=Array.isArray(detail)?detail.map(item=>`${(item.loc||[]).join(".")}: ${item.msg}`).join("; "):
+        typeof detail==="string"?detail:detail?JSON.stringify(detail):"Request failed ("+response.status+")";
+      throw new Error(message);
+    }
     return data;
   }
   function status(message, error=false) { $("api-status").textContent=message; $("api-status").className=error?"status-error":"status-ok"; }
@@ -81,8 +86,10 @@
           y:{ticks:{color:"#748798"},grid:{color:"#24313b"}}}}});
   }
   function render(result) {
+    if(state.advancedChart){state.advancedChart.destroy();state.advancedChart=null;}
+    $("advanced-output").replaceChildren();$("advanced-output").hidden=true;
     const rows=flatten(result); state.ids=rows.filter(row=>row.status==="completed").map(row=>row.definition.experiment_id);
-    state.sensitivityIds=rows.filter(row=>row.status==="completed"&&(row.definition.phase==="train"||row.definition.phase==="batch"))
+    state.sensitivityIds=ResearchWorkspaceState.sensitivityGroup(rows)
       .map(row=>row.definition.experiment_id);
     state.correlationIds=ResearchWorkspaceState.alignedCorrelationGroup(rows)
       .map(row=>row.definition.experiment_id);
@@ -90,8 +97,19 @@
     $("correlation-hint").textContent=state.correlationIds.length>=2
       ? `${state.correlationIds.length} aligned ${state.correlationIds[0]&&rows.find(row=>row.definition.experiment_id===state.correlationIds[0]).definition.phase.toUpperCase()} return series`
       : "Correlation needs at least two completed results from the same phase and data period.";
+    $("run-sensitivity").disabled=state.sensitivityIds.length<2;
+    $("sensitivity-hint").textContent=state.sensitivityIds.length>=2
+      ? `${state.sensitivityIds.length} comparable ${rows.find(row=>row.definition.experiment_id===state.sensitivityIds[0]).definition.phase.toUpperCase()} configurations`
+      : "Sensitivity needs multiple completed parameter configurations in one training or batch period.";
+    $("run-portfolio").disabled=state.correlationIds.length<2;
+    $("portfolio-hint").textContent=state.correlationIds.length>=2
+      ? `${state.correlationIds.length} aligned series will receive equal weights.`
+      : "Portfolio curve needs at least two completed aligned results.";
     const oosRow=rows.find(row=>row.definition.phase==="oos"&&row.status==="completed"&&row.analysis_result);
     state.baselineId=oosRow?.definition.experiment_id||state.sensitivityIds[0]||state.ids[0]||null;
+    $("run-robustness").disabled=!state.baselineId;
+    $("run-mc").disabled=!state.baselineId;
+    $("run-regime").disabled=!state.baselineId;
     const analysis=oosRow?.analysis_result||rows.find(row=>row.analysis_result)?.analysis_result;
     const walk=result.walk_forward||result;
     $("result-title").textContent=result.training?"Training and OOS evaluation":walk.windows?walk.windows.length+" walk-forward windows":"Backtest / batch results";
@@ -124,30 +142,87 @@
   $("mode").addEventListener("change",()=>{updateMode();initializeSplit();});
   $("symbol").addEventListener("change",()=>loadRange().catch(reason=>error(reason.message)));
   $("clear-results").addEventListener("click",()=>{state.ids=[];state.sensitivityIds=[];state.correlationIds=[];state.baselineId=null;
-    $("run-correlation").disabled=true;$("correlation-hint").textContent="Correlation needs at least two completed results from the same phase and data period.";
+    for(const id of ["run-sensitivity","run-robustness","run-correlation","run-portfolio","run-mc","run-regime"])
+      $(id).disabled=true;
+    $("sensitivity-hint").textContent="Sensitivity needs multiple completed parameter configurations in one training or batch period.";
+    $("correlation-hint").textContent="Correlation needs at least two completed results from the same phase and data period.";
+    $("portfolio-hint").textContent="Portfolio curve needs at least two completed aligned results.";
+    if(state.advancedChart){state.advancedChart.destroy();state.advancedChart=null;}
     if(state.chart){state.chart.destroy();state.chart=null;}
     $("records").replaceChildren();$("summary").hidden=true;$("advanced-tools").hidden=true;$("chart-empty").hidden=false;
     $("result-title").textContent="No experiment loaded";$("advanced-output").hidden=true;});
-  async function advanced(path,body){const out=$("advanced-output");out.hidden=false;out.textContent="Loading…";
-    try{out.textContent=JSON.stringify(await request(path,body),null,2);}catch(reason){out.textContent=reason.message;}}
+  function renderAdvanced(result){
+    const out=$("advanced-output"),view=ResearchPresentation.advancedView(result);
+    if(state.advancedChart){state.advancedChart.destroy();state.advancedChart=null;}
+    out.replaceChildren();out.hidden=false;
+    const heading=document.createElement("div");heading.className="advanced-heading";
+    const title=document.createElement("h3");title.textContent=view.title;heading.append(title);
+    const summary=document.createElement("div");summary.className="advanced-summary";
+    for(const item of view.summary){
+      const card=document.createElement("div");card.className="advanced-metric";
+      const label=document.createElement("small");label.textContent=item.label;
+      const value=document.createElement("b");value.textContent=item.value==null?"—":String(item.value);
+      card.append(label,value);summary.append(card);
+    }
+    out.append(heading,summary);
+    if(view.columns.length){
+      const wrapper=document.createElement("div");wrapper.className="table-wrap advanced-table";
+      const table=document.createElement("table"),thead=document.createElement("thead"),headRow=document.createElement("tr");
+      for(const column of view.columns){const cell=document.createElement("th");cell.textContent=column;headRow.append(cell);}
+      thead.append(headRow);table.append(thead);
+      const tbody=document.createElement("tbody");
+      for(const values of view.rows){const row=document.createElement("tr");
+        for(const value of values){const cell=document.createElement("td");cell.textContent=value==null?"—":String(value);row.append(cell);}
+        tbody.append(row);
+      }
+      if(!view.rows.length){const row=document.createElement("tr"),cell=document.createElement("td");
+        cell.colSpan=view.columns.length;cell.textContent="No defined observations for this analysis.";row.append(cell);tbody.append(row);}
+      table.append(tbody);wrapper.append(table);out.append(wrapper);
+    }
+    if(view.chart?.points?.length){
+      const chartBox=document.createElement("div");chartBox.className="chart-box advanced-chart-box";
+      const canvas=document.createElement("canvas");canvas.setAttribute("aria-label",view.chart.label);chartBox.append(canvas);out.append(chartBox);
+      state.advancedChart=new Chart(canvas,{type:"line",data:{datasets:[{label:view.chart.label,
+        data:view.chart.points.map(point=>({x:new Date(point.timestamp),y:point.value})),
+        borderColor:"#58bad1",backgroundColor:"#58bad122",pointRadius:0,borderWidth:1.5,fill:true}]},
+        options:{responsive:true,maintainAspectRatio:false,animation:false,parsing:false,plugins:{legend:{display:false}},
+          scales:{x:{type:"time",ticks:{color:"#748798",maxTicksLimit:8},grid:{color:"#24313b"}},
+            y:{ticks:{color:"#748798"},grid:{color:"#24313b"}}}}});
+    }
+    if(view.note){const note=document.createElement("p");note.className="advanced-note";note.textContent=view.note;out.append(note);}
+    const sources=document.createElement("small");sources.className="advanced-sources";
+    sources.textContent=`Source experiment IDs: ${(result.input_experiment_ids||[]).join(", ")||"—"}`;out.append(sources);
+  }
+  function renderAdvancedError(message){
+    const out=$("advanced-output");out.replaceChildren();out.hidden=false;
+    const notice=document.createElement("p");notice.className="advanced-error";notice.setAttribute("role","alert");
+    notice.textContent=message;out.append(notice);
+  }
+  async function advanced(path,body,button){const out=$("advanced-output");out.hidden=false;out.textContent="Running analysis…";
+    if(button)button.disabled=true;
+    try{renderAdvanced(await request(path,body));}
+    catch(reason){renderAdvancedError(reason.message);}
+    finally{if(button)button.disabled=false;}}
   $("run-sensitivity").addEventListener("click",()=>advanced("/advanced/sensitivity",{experiment_ids:state.sensitivityIds,
-    metric:$("advanced-metric").value,parameters:["fast_period","slow_period"]}));
+    metric:$("advanced-metric").value,parameters:["fast_period","slow_period"]},$("run-sensitivity")));
   $("run-robustness").addEventListener("click",()=>advanced("/advanced/robustness",{experiment_id:state.baselineId,
     metric:$("advanced-metric").value,scenarios:[
       {name:"commission plus 0.1 per unit",commission_per_unit_addition:0.1},
       {name:"spread scale doubled",spread_multiplier:2},
       {name:"slippage doubled",slippage_multiplier:2,slippage_addition:0.0001}
-    ]}));
+    ]},$("run-robustness")));
   $("run-correlation").addEventListener("click",()=>{
     if(state.correlationIds.length<2)return;
-    advanced("/advanced/correlation",{experiment_ids:state.correlationIds});
+    advanced("/advanced/correlation",{experiment_ids:state.correlationIds},$("run-correlation"));
   });
-  $("run-portfolio").addEventListener("click",()=>{const ids=state.sensitivityIds;
-    if(!ids.length)return;const weights={};for(const id of ids)weights[id]=1/ids.length;
-    advanced("/advanced/portfolio",{experiment_ids:ids,weights:weights,initial_capital:100000});});
+  $("run-portfolio").addEventListener("click",()=>{
+    const aligned=state.correlationIds;if(aligned.length<2)return;const weights={};
+    for(const id of aligned)weights[id]=1/aligned.length;
+    advanced("/advanced/portfolio",{experiment_ids:aligned,weights:weights,
+      initial_capital:Number(form.elements.initial_cash.value)},$("run-portfolio"));});
   $("run-mc").addEventListener("click",()=>advanced("/advanced/monte-carlo",{experiment_id:state.baselineId,
-    simulations:Number($("mc-count").value),seed:Number($("mc-seed").value),method:"bootstrap"}));
+    simulations:Number($("mc-count").value),seed:Number($("mc-seed").value),method:"bootstrap"},$("run-mc")));
   $("run-regime").addEventListener("click",()=>advanced("/advanced/regimes",{experiment_id:state.baselineId,
-    lookback:Number($("regime-lookback").value),volatility_threshold:Number($("regime-threshold").value)}));
+    lookback:Number($("regime-lookback").value),volatility_threshold:Number($("regime-threshold").value)},$("run-regime")));
   updateMode();loadCatalog();
 })();

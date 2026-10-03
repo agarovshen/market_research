@@ -48,10 +48,12 @@
           <label>Regime lookback<input id="regime-lookback" type="number" min="2" value="20"></label>
           <label>Volatility threshold<input id="regime-threshold" type="number" min="0" step="any" value="0.001"></label>
           <button id="run-sensitivity" type="button">Parameter sensitivity</button>
+          <small id="sensitivity-hint" class="tool-hint" role="status">Sensitivity needs multiple completed parameter configurations in one training or batch period.</small>
           <button id="run-robustness" type="button">Cost robustness</button>
           <button id="run-correlation" type="button">Return correlation</button>
           <small id="correlation-hint" class="tool-hint" role="status">Correlation needs at least two completed results from the same phase and data period.</small>
           <button id="run-portfolio" type="button">Equal-weight research curve</button>
+          <small id="portfolio-hint" class="tool-hint" role="status">Portfolio curve needs at least two completed aligned results.</small>
           <button id="run-mc" type="button">Trade bootstrap</button><button id="run-regime" type="button">Regime report</button>
         </div>
         <div id="advanced-output" class="advanced-output" hidden></div>
@@ -61,6 +63,7 @@
     </div>
   </main>
   <script src="/static/js/research-state.js"></script>
+  <script src="/static/js/research-presentation.js"></script>
   <script src="/static/js/research-workspace.js"></script>
 </body>
 </html>
