@@ -16,10 +16,13 @@ class MarketDataRepository:
     TIMEFRAMES = {"M1", "M5", "M15", "H1", "H4", "D1"}
 
     def load(self, instrument: int | str, start: datetime | None = None,
-             end: datetime | None = None, *, timeframe: str = "M1") -> tuple[Bar, ...]:
+             end: datetime | None = None, *, timeframe: str = "M1",
+             end_exclusive: datetime | None = None) -> tuple[Bar, ...]:
         timeframe = timeframe.upper()
         if timeframe not in self.TIMEFRAMES:
             raise ValueError(f"Unsupported timeframe: {timeframe}")
+        if end is not None and end_exclusive is not None:
+            raise ValueError("Specify either inclusive end or end_exclusive, not both")
         if isinstance(instrument, str):
             record = self.session.scalar(select(Instrument).where(Instrument.symbol == instrument.upper()))
             if record is None:
@@ -32,6 +35,8 @@ class MarketDataRepository:
             query = query.where(MarketData.timestamp >= start)
         if end is not None:
             query = query.where(MarketData.timestamp <= end)
+        if end_exclusive is not None:
+            query = query.where(MarketData.timestamp < end_exclusive)
         rows = self.session.scalars(query.order_by(MarketData.timestamp, MarketData.id)).all()
         bars = tuple(Bar(
             timestamp=row.timestamp, open=row.open, high=row.high, low=row.low,

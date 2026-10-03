@@ -1,6 +1,7 @@
 from logging.config import fileConfig
 from app.database import Base
 from app import models
+from app.research.storage import ResearchExperimentRecord
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 import os
