@@ -21,9 +21,36 @@ let returnChart=null;
 let volumeChart=null;
 let chartType="candlestick";
 let selectedTimestamp=null;
+let frozenTimestamp=null;
 if(typeof ChartZoom!=="undefined")Chart.register(ChartZoom);
-if(typeof CrosshairPlugin!=="undefined")Chart.register(CrosshairPlugin);
 if(typeof CandlestickController!=="undefined"&&typeof CandlestickElement!=="undefined")Chart.register(CandlestickController,CandlestickElement);
+const selectedCandlePlugin={
+    id:"selectedCandle",
+    afterDraw(chart){
+        const timestamp=frozenTimestamp??selectedTimestamp;
+        if(timestamp===null)return;
+        const xScale=chart.scales.x;
+        const yScale=chart.scales.y;
+        if(!xScale||!yScale)return;
+        const x=xScale.getPixelForValue(timestamp);
+        if(!Number.isFinite(x)||x<xScale.left||x>xScale.right)return;
+        const ctx=chart.ctx;
+        ctx.save();
+        ctx.beginPath();
+        ctx.moveTo(x,yScale.top);
+        ctx.lineTo(x,yScale.bottom);
+        ctx.lineWidth=1.5;
+        ctx.strokeStyle="#f8fafc";
+        ctx.setLineDash([5,4]);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.arc(x,yScale.top,4,0,Math.PI*2);
+        ctx.fillStyle="#f8fafc";
+        ctx.fill();
+        ctx.restore();
+    }
+};
+Chart.register(selectedCandlePlugin);
 function setStatus(message,type){
     status.className="mt-4 rounded-xl border px-4 py-3 text-sm";
     if(type==="success")status.classList.add("border-emerald-500/20","bg-emerald-500/5","text-emerald-400");
@@ -82,6 +109,7 @@ function chartOptions(data){
             const index=elements[0].index;
             if(!data[index])return;
             selectedTimestamp=new Date(data[index].timestamp).getTime();
+            priceChart?.update("none");
         },
         plugins:{
             legend:{display:false},
@@ -99,11 +127,6 @@ function chartOptions(data){
             zoom:{
                 pan:{enabled:true,mode:"x"},
                 zoom:{wheel:{enabled:true},pinch:{enabled:true},drag:{enabled:true},mode:"x"}
-            },
-            crosshair:{
-                line:{color:"#94a3b8",width:1},
-                sync:{enabled:false},
-                zoom:{enabled:false}
             }
         },
         scales:{
@@ -123,12 +146,13 @@ function chartOptions(data){
 function getCenteredData(){
     if(!marketData.length)return[];
     const range=Math.min(Number(rangeSlider.value),marketData.length);
-    if(!selectedTimestamp)return marketData.slice(-range);
+    const timestamp=frozenTimestamp??selectedTimestamp;
+    if(timestamp===null)return marketData.slice(-range);
     let index=0;
     let distance=Infinity;
     for(let i=0;i<marketData.length;i++){
-        const timestamp=new Date(marketData[i].timestamp).getTime();
-        const currentDistance=Math.abs(timestamp-selectedTimestamp);
+        const currentTimestamp=new Date(marketData[i].timestamp).getTime();
+        const currentDistance=Math.abs(currentTimestamp-timestamp);
         if(currentDistance<distance){
             distance=currentDistance;
             index=i;
@@ -138,42 +162,66 @@ function getCenteredData(){
     start=Math.max(0,Math.min(start,marketData.length-range));
     return marketData.slice(start,start+range);
 }
+function destroyChart(chart){
+    if(!chart)return;
+    try{chart.destroy();}catch(error){}
+}
+function destroyAllCharts(){
+    destroyChart(priceChart);
+    destroyChart(returnChart);
+    destroyChart(volumeChart);
+    priceChart=null;
+    returnChart=null;
+    volumeChart=null;
+}
 function renderCharts(data){
     if(!data.length)return;
-    priceChart?.destroy();
-    returnChart?.destroy();
-    volumeChart?.destroy();
+    destroyAllCharts();
+    const priceCanvas=document.getElementById("price-chart");
+    const returnCanvas=document.getElementById("return-chart");
+    const volumeCanvas=document.getElementById("volume-chart");
+    const oldPriceChart=Chart.getChart(priceCanvas);
+    const oldReturnChart=Chart.getChart(returnCanvas);
+    const oldVolumeChart=Chart.getChart(volumeCanvas);
+    if(oldPriceChart)oldPriceChart.destroy();
+    if(oldReturnChart)oldReturnChart.destroy();
+    if(oldVolumeChart)oldVolumeChart.destroy();
     const candles=data.map(row=>({x:new Date(row.timestamp).getTime(),o:Number(row.open),h:Number(row.high),l:Number(row.low),c:Number(row.close)}));
     const timestamps=data.map(row=>new Date(row.timestamp).getTime());
     const returns=calculateReturns(data);
-    priceChart=new Chart(document.getElementById("price-chart"),{
+    priceChart=new Chart(priceCanvas,{
         type:chartType==="candlestick"?"candlestick":"line",
-        data:{datasets:[chartType==="candlestick"?{
-            label:"Price",
-            data:candles,
-            color:{up:"#22c55e",down:"#ef4444",unchanged:"#94a3b8"},
-            borderColor:{up:"#22c55e",down:"#ef4444",unchanged:"#94a3b8"},
-            backgroundColor:{up:"#22c55e",down:"#ef4444",unchanged:"#94a3b8"}
-        }:{
-            label:"Close",
-            data:data.map(row=>({x:new Date(row.timestamp).getTime(),y:Number(row.close)})),
-            borderColor:"#22d3ee",
-            borderWidth:1.5,
-            pointRadius:0,
-            pointHoverRadius:3,
-            tension:0
-        }]},
+        data:{
+            datasets:[chartType==="candlestick"?{
+                label:"Price",
+                data:candles,
+                color:{up:"#22c55e",down:"#ef4444",unchanged:"#94a3b8"},
+                borderColor:{up:"#22c55e",down:"#ef4444",unchanged:"#94a3b8"},
+                backgroundColor:{up:"#22c55e",down:"#ef4444",unchanged:"#94a3b8"}
+            }:{
+                label:"Close",
+                data:data.map(row=>({x:new Date(row.timestamp).getTime(),y:Number(row.close)})),
+                borderColor:"#22d3ee",
+                borderWidth:1.5,
+                pointRadius:0,
+                pointHoverRadius:3,
+                tension:0
+            }]
+        },
         options:chartOptions(data)
     });
+    priceCanvas.ondblclick=handlePriceDoubleClick;
     const unit=getTimeUnit();
-    returnChart=new Chart(document.getElementById("return-chart"),{
+    returnChart=new Chart(returnCanvas,{
         type:"bar",
-        data:{datasets:[{
-            label:"Return",
-            data:returns.map((value,index)=>({x:timestamps[index+1],y:value})),
-            backgroundColor:returns.map(value=>value>=0?"#22c55e":"#ef4444"),
-            borderWidth:0
-        }]},
+        data:{
+            datasets:[{
+                label:"Return",
+                data:returns.map((value,index)=>({x:timestamps[index+1],y:value})),
+                backgroundColor:returns.map(value=>value>=0?"#22c55e":"#ef4444"),
+                borderWidth:0
+            }]
+        },
         options:{
             responsive:true,
             maintainAspectRatio:false,
@@ -187,26 +235,28 @@ function renderCharts(data){
             }
         }
     });
-    volumeChart=new Chart(document.getElementById("volume-chart"),{
+    volumeChart=new Chart(volumeCanvas,{
         type:"line",
-        data:{datasets:[
-            {
-                label:"Tick Volume",
-                data:data.map(row=>({x:new Date(row.timestamp).getTime(),y:Number(row.tick_volume)})),
-                borderColor:"#a78bfa",
-                borderWidth:1.5,
-                pointRadius:0,
-                tension:0
-            },
-            {
-                label:"Volume",
-                data:data.map(row=>({x:new Date(row.timestamp).getTime(),y:Number(row.volume)})),
-                borderColor:"#f59e0b",
-                borderWidth:1.5,
-                pointRadius:0,
-                tension:0
-            }
-        ]},
+        data:{
+            datasets:[
+                {
+                    label:"Tick Volume",
+                    data:data.map(row=>({x:new Date(row.timestamp).getTime(),y:Number(row.tick_volume)})),
+                    borderColor:"#a78bfa",
+                    borderWidth:1.5,
+                    pointRadius:0,
+                    tension:0
+                },
+                {
+                    label:"Volume",
+                    data:data.map(row=>({x:new Date(row.timestamp).getTime(),y:Number(row.volume)})),
+                    borderColor:"#f59e0b",
+                    borderWidth:1.5,
+                    pointRadius:0,
+                    tension:0
+                }
+            ]
+        },
         options:{
             responsive:true,
             maintainAspectRatio:false,
@@ -220,6 +270,29 @@ function renderCharts(data){
             }
         }
     });
+}
+function handlePriceDoubleClick(event){
+    if(!priceChart||!marketData.length)return;
+    const rect=event.currentTarget.getBoundingClientRect();
+    const x=event.clientX-rect.left;
+    const xScale=priceChart.scales.x;
+    if(!xScale)return;
+    const timestamp=xScale.getValueForPixel(x);
+    if(!Number.isFinite(timestamp))return;
+    let closestIndex=0;
+    let closestDistance=Infinity;
+    for(let i=0;i<marketData.length;i++){
+        const candleTimestamp=new Date(marketData[i].timestamp).getTime();
+        const distance=Math.abs(candleTimestamp-timestamp);
+        if(distance<closestDistance){
+            closestDistance=distance;
+            closestIndex=i;
+        }
+    }
+    if(!marketData[closestIndex])return;
+    frozenTimestamp=new Date(marketData[closestIndex].timestamp).getTime();
+    selectedTimestamp=frozenTimestamp;
+    priceChart.update("none");
 }
 function renderCurrentView(){
     const visibleData=getCenteredData();
@@ -237,7 +310,8 @@ function setChartType(type){
 async function loadMarketData(symbol,period,limit=5000){
     setStatus(`Loading ${period} market history...`,"info");
     const params=new URLSearchParams({symbol,timeframe:period,limit:String(limit)});
-    if(selectedTimestamp)params.set("center_timestamp",new Date(selectedTimestamp).toISOString());
+    const timestamp=frozenTimestamp??selectedTimestamp;
+    if(timestamp!==null)params.set("center_timestamp",new Date(timestamp).toISOString());
     const response=await fetch(`/market-data?${params.toString()}`);
     const result=await response.json();
     if(!response.ok)throw new Error(result.detail||"Failed to load market data.");
@@ -246,12 +320,7 @@ async function loadMarketData(symbol,period,limit=5000){
     if(Number(rangeSlider.value)>Number(rangeSlider.max))rangeSlider.value=rangeSlider.max;
     rangeValue.textContent=Number(rangeSlider.value).toLocaleString();
     if(!marketData.length){
-        priceChart?.destroy();
-        returnChart?.destroy();
-        volumeChart?.destroy();
-        priceChart=null;
-        returnChart=null;
-        volumeChart=null;
+        destroyAllCharts();
         setStatus(`${symbol} has no market data for ${period}.`,"warning");
         return;
     }
@@ -294,7 +363,8 @@ rangeSlider?.addEventListener("input",()=>{
 });
 instrument.addEventListener("change",()=>{
     selectedTimestamp=null;
-    loadMarketData(instrument.value,timeframe.value).catch(error=>setStatus(error.message,"error"));
+    frozenTimestamp=null;
+    loadMarketData(instrument.value,timeframe.value,5000).catch(error=>setStatus(error.message,"error"));
 });
 timeframe.addEventListener("change",()=>{
     loadMarketData(instrument.value,timeframe.value,5000).catch(error=>setStatus(error.message,"error"));
