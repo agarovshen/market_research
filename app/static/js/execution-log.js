@@ -5,6 +5,11 @@
 })(typeof globalThis !== "undefined" ? globalThis : this, function () {
     "use strict";
 
+    const meaningfulTypes = new Set([
+        "signal", "order_created", "order_pending", "order_triggered", "execution",
+        "position_opened", "stop_updated", "position_closed", "pnl_calculated", "trade_created",
+    ]);
+
     function readEvents(backtestResult) {
         const raw = backtestResult?.execution_trace;
         if (raw == null) return { events: [], malformedCount: 0 };
@@ -26,12 +31,15 @@
     function displayEvents(backtestResult) {
         const parsed = readEvents(backtestResult);
         const activeBars = new Set(parsed.events
-            .filter(event => event.event_type.toLowerCase() !== "bar")
-            .map(event => event.bar_index));
+            .filter(event => meaningfulTypes.has(event.event_type.trim().toLowerCase()) &&
+                event.bar_index != null)
+            .map(event => String(event.bar_index)));
         return {
             ...parsed,
-            events: parsed.events.filter(event => event.event_type.toLowerCase() !== "bar" ||
-                activeBars.has(event.bar_index)),
+            events: parsed.events.filter(event => {
+                if (event.event_type.trim().toLowerCase() !== "bar") return true;
+                return event.bar_index != null && activeBars.has(String(event.bar_index));
+            }),
         };
     }
 

@@ -243,13 +243,15 @@ test("canonical execution event reader retains event order and malformed isolati
 
 test("execution log display hides idle BAR rows but retains BAR context for lifecycle events", () => {
     const raw = [
-        { sequence: 1, timestamp: rows[0].timestamp, event_type: "bar", bar_index: 0 },
-        { sequence: 2, timestamp: rows[0].timestamp, event_type: "signal", bar_index: 0 },
-        { sequence: 3, timestamp: rows[1].timestamp, event_type: "bar", bar_index: 1 },
-        { sequence: 4, timestamp: rows[2].timestamp, event_type: "execution", bar_index: 2 },
+        { sequence: 1, timestamp: rows[0].timestamp, event_type: "bar", bar_index: 774 },
+        { sequence: 2, timestamp: rows[0].timestamp, event_type: "order_triggered", bar_index: 774 },
+        { sequence: 3, timestamp: rows[0].timestamp, event_type: "execution", bar_index: 774 },
+        { sequence: 4, timestamp: rows[0].timestamp, event_type: "position_opened", bar_index: 774 },
+        { sequence: 5, timestamp: rows[1].timestamp, event_type: "bar", bar_index: 775 },
     ];
-    assert.deepEqual(ExecutionLog.readEvents({ execution_trace: raw }).events.map(event => event.sequence), [1, 2, 3, 4]);
-    assert.deepEqual(ExecutionLog.displayEvents({ execution_trace: raw }).events.map(event => event.sequence), [1, 2, 4]);
+    assert.deepEqual(ExecutionLog.readEvents({ execution_trace: raw }).events, raw);
+    assert.deepEqual(ExecutionLog.displayEvents({ execution_trace: raw }).events.map(event => event.sequence),
+        [1, 2, 3, 4]);
 });
 
 test("Copy all log copies every rendered column and row and safely handles an empty log", async () => {
@@ -278,11 +280,19 @@ test("Copy all log copies every rendered column and row and safely handles an em
     try {
         const row = { definition: { strategy_id: "fixture", symbol: "GBPUSD", timeframe: "H4" },
             backtest_result: { execution_trace: [
-                { sequence: 1, timestamp: rows[0].timestamp, event_type: "signal", bar_index: 2,
-                    side: "long", details: [["strategy_reason", "breakout"]] },
-                { sequence: 2, timestamp: rows[1].timestamp, event_type: "execution", bar_index: 3,
+                { sequence: 1, timestamp: rows[0].timestamp, event_type: "bar", bar_index: 774,
+                    details: [["open", 1.3189], ["high", 1.3197], ["low", 1.3176],
+                        ["close", 1.3196], ["spread", 3]] },
+                { sequence: 2, timestamp: rows[0].timestamp, event_type: "order_triggered", bar_index: 774,
+                    trigger_price: 1.33 },
+                { sequence: 3, timestamp: rows[0].timestamp, event_type: "execution", bar_index: 774,
                     side: "long", order_id: 8, trade_id: 4, price: 1.34, quantity: 2,
                     trigger_price: 1.33, stop_loss: 1.32, details: [["spread_cost", 0.00003]] },
+                { sequence: 4, timestamp: rows[0].timestamp, event_type: "position_opened", bar_index: 774,
+                    side: "long", order_id: 8, trade_id: 4 },
+                { sequence: 5, timestamp: rows[1].timestamp, event_type: "bar", bar_index: 775,
+                    details: [["open", 1.3189], ["high", 1.3197], ["low", 1.3176],
+                        ["close", 1.3196], ["spread", 3]] },
             ] } };
         ResultSections.renderExecutionLog(row);
         assert.equal(elements["copy-execution-log"].disabled, false);
@@ -291,9 +301,11 @@ test("Copy all log copies every rendered column and row and safely handles an em
         const copiedLines = copied[0].split("\n");
         assert.deepEqual(copiedLines[0].split("\t"), ["#", "Time", "Bar", "Event", "Side", "Order",
             "Trade", "Price", "Quantity", "Trigger", "Stop loss", "Details"]);
-        assert.equal(copiedLines.length, 3);
-        assert.match(copiedLines[1], /strategy_reason=breakout/);
-        assert.match(copiedLines[2], /spread_cost=0\.00003/);
+        assert.equal(copiedLines.length, 5);
+        assert.deepEqual(copiedLines.slice(1).map(line => line.split("\t")[0]), ["1", "2", "3", "4"]);
+        assert.match(copiedLines[1], /open=1\.3189/);
+        assert.match(copiedLines[3], /spread_cost=0\.00003/);
+        assert.equal(copiedLines.some(line => line.includes("775")), false);
         ResultSections.renderExecutionLog(null);
         assert.equal(elements["copy-execution-log"].disabled, true);
         await elements["copy-execution-log"].onclick();
