@@ -31,14 +31,20 @@ from app.research.parameters import ParameterSet, ParameterSpace, ParameterValue
 
 
 class StrategyFactory(Protocol):
-    """Versioned, user-owned strategy construction and parameter validation."""
+    """Versioned strategy construction; ``create`` returns a fresh instance.
+
+    ResearchEngine treats each created strategy as single-run state and does
+    not reset or clone it. Factories must return a new object on every call.
+    """
 
     strategy_id: str
     strategy_version: str
 
     def validate(self, parameters: Mapping[str, ParameterValue]) -> None: ...
 
-    def create(self, parameters: Mapping[str, ParameterValue]) -> Strategy: ...
+    def create(self, parameters: Mapping[str, ParameterValue]) -> Strategy:
+        """Return a fresh strategy instance for this candidate/phase run."""
+        ...
 
 
 class ResearchResultStore(Protocol):

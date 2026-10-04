@@ -1,10 +1,13 @@
+from datetime import datetime, timedelta
+
 import pytest
 
-from app.backtest import BacktestEngine, BacktestSettings, OrderAction, Side, Signal
+from app.analysis import AnalysisEngine
+from app.backtest import BacktestEngine, BacktestSettings, Bar, OrderAction, Side, Signal
 from app.research import (
     RegimeDefinition, analyze_regimes, correlate_equity_returns, monte_carlo_trades,
 )
-from app.research.advanced import drawdown_from_equity
+from app.research.advanced import drawdown_from_equity, weighted_rebalanced_portfolio
 from tests.validation.support import bars
 
 
@@ -58,3 +61,43 @@ def test_simple_drawdown_known_path_and_regimes_are_deterministic():
 def test_correlation_constant_and_known_relationships():
     with pytest.raises(ValueError, match="at least two"):
         correlate_equity_returns({})
+
+
+class BuyOnFirstBar:
+    def on_bar(self, context):
+        if context.index == 0:
+            return Signal(OrderAction.OPEN, Side.LONG)
+
+
+def _analysis_with_final_close(close):
+    start = datetime(2024, 1, 1)
+    data = (
+        Bar(start, 1, 1, 1, 1),
+        Bar(start + timedelta(days=1), 1, max(1, close), min(1, close), close),
+    )
+    backtest = BacktestEngine(BacktestSettings(initial_cash=1)).run(data, BuyOnFirstBar())
+    return AnalysisEngine().analyze(backtest)
+
+
+def test_weighted_portfolio_is_independent_of_equivalent_mapping_order():
+    # One large return and two near-total losses expose order-dependent sums.
+    results = {
+        "a": _analysis_with_final_close(1_000_000_000_001.0),
+        "b": _analysis_with_final_close(0.01),
+        "c": _analysis_with_final_close(0.01),
+    }
+    weights = {name: 1 / 3 for name in results}
+    first = weighted_rebalanced_portfolio(results, weights, 100)
+
+    reordered_names = ("c", "b", "a")
+    reordered_results = {name: results[name] for name in reordered_names}
+    reordered_weights = {name: weights[name] for name in reordered_names}
+    second = weighted_rebalanced_portfolio(reordered_results, reordered_weights, 100)
+
+    assert first == second
+    assert tuple(point.period_return.hex() for point in first.points) == tuple(
+        point.period_return.hex() for point in second.points
+    )
+    assert tuple(point.equity.hex() for point in first.points) == tuple(
+        point.equity.hex() for point in second.points
+    )

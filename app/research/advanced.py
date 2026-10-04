@@ -418,21 +418,23 @@ def weighted_rebalanced_portfolio(
         raise ValueError("initial_capital must be positive and finite")
     if any(not isfinite(value) or value < 0 for value in weights.values()):
         raise ValueError("Portfolio weights must be finite and nonnegative")
-    if not isclose(sum(weights.values()), 1.0, rel_tol=0, abs_tol=1e-10):
+    names = tuple(sorted(results))
+    if not isclose(sum(weights[name] for name in names), 1.0, rel_tol=0, abs_tol=1e-10):
         raise ValueError("Portfolio weights must sum to 1")
-    timestamp_sets = [tuple(point.timestamp for point in result.equity_curve)
-                      for result in results.values()]
+    timestamp_sets = [tuple(point.timestamp for point in results[name].equity_curve)
+                      for name in names]
     if any(timestamps != timestamp_sets[0] for timestamps in timestamp_sets[1:]):
         raise ValueError("Portfolio input series must have identical observation timestamps")
     timestamps = timestamp_sets[0]
-    prior_equity = {name: results[name].starting_equity for name in results}
-    point_by_name = {name: {point.timestamp: point.equity for point in value.equity_curve}
-                     for name, value in results.items()}
+    prior_equity = {name: results[name].starting_equity for name in names}
+    point_by_name = {name: {point.timestamp: point.equity
+                            for point in results[name].equity_curve}
+                     for name in names}
     portfolio_equity = initial_capital
     points = []
     for timestamp in timestamps:
         period_return = 0.0
-        for name in results:
+        for name in names:
             current = point_by_name[name][timestamp]
             start = prior_equity[name]
             if start <= 0:

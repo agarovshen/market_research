@@ -163,3 +163,13 @@ bars are returned in first-seen chronological bucket order. Configured
 start/end filters apply to source rows before aggregation. A centered chart
 window chooses the nearest available bucket (earlier bucket breaks ties) and
 then returns the requested surrounding bars.
+
+## Strategy instance lifecycle
+
+`BacktestEngine.run()` and `BacktestRunner.run()` accept a strategy instance
+for one run. A strategy may keep mutable state during that run; neither layer
+resets nor clones strategy objects. Callers must create a fresh instance for
+each independent run. This avoids copying arbitrary user strategy objects or
+silently resetting legitimate within-run state. ResearchEngine follows this
+contract by calling the supplied strategy factory once for each candidate in
+each phase run.

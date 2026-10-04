@@ -288,6 +288,40 @@ class ResearchBatchTests(unittest.TestCase):
         self.assertNotEqual(first.results[0].definition.experiment_id,
                             changed.results[0].definition.experiment_id)
 
+    def test_research_factory_creates_fresh_stateful_strategy_per_run(self):
+        class StatefulStrategy:
+            def __init__(self, quantity):
+                self.quantity = quantity
+                self.calls = 0
+
+            def on_bar(self, context):
+                self.calls += 1
+                if self.calls == 1:
+                    return Signal(OrderAction.OPEN, Side.LONG, self.quantity)
+                if self.calls == 3:
+                    return Signal(OrderAction.CLOSE)
+
+        class StatefulFactory(QuantityFactory):
+            def __init__(self):
+                self.created = []
+
+            def create(self, parameters):
+                strategy = StatefulStrategy(parameters["quantity"])
+                self.created.append(strategy)
+                return strategy
+
+        factory = StatefulFactory()
+        engine = run_engine()
+        candidates = ({"quantity": 1},)
+        first = engine.run_batch(candidates, strategy_factory=factory, config=base_config())
+        second = engine.run_batch(candidates, strategy_factory=factory, config=base_config())
+
+        self.assertEqual(first, second)
+        self.assertEqual(first.results[0].analysis_result.trades.total_trades, 1)
+        self.assertEqual(second.results[0].analysis_result.trades.total_trades, 1)
+        self.assertEqual(len(factory.created), 2)
+        self.assertIsNot(factory.created[0], factory.created[1])
+
     def test_random_method_requires_a_seed_and_records_parameter_space(self):
         space = ParameterSpace((IntegerRange("quantity", 1, 20),))
         with self.assertRaisesRegex(ValueError, "explicit seed"):

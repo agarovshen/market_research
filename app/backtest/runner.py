@@ -48,7 +48,11 @@ class BacktestRunConfig:
 
 
 class BacktestRunner:
-    """Load bars through the existing repository, then delegate to the core engine."""
+    """Load bars and delegate to the engine using a one-run strategy instance.
+
+    Supply a fresh strategy object for every independent run. Mutable strategy
+    state is neither reset nor cloned by the runner.
+    """
 
     def __init__(self, repository):
         self.repository = repository

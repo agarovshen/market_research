@@ -25,7 +25,12 @@ class BacktestSettings:
 
 
 class BacktestEngine:
-    """Single instrument, one net position, next-bar-open deterministic simulator."""
+    """Single instrument, one net position, next-bar-open deterministic simulator.
+
+    ``run`` consumes one strategy instance for one run. The engine does not
+    reset or clone strategies; callers must supply a fresh instance for each
+    independent run, especially when a strategy keeps mutable state.
+    """
 
     def __init__(self, settings: BacktestSettings = BacktestSettings()):
         self.settings = settings

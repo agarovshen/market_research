@@ -42,6 +42,13 @@ class BarHistory(Sequence[Bar]):
 
 
 class Strategy(Protocol):
-    """Return an instruction after observing this completed bar and its history."""
+    """Return an instruction after observing this completed bar and its history.
+
+    A strategy object is supplied directly to a backtest run. Implementations
+    may keep state while that run is in progress, but the engine does not reset
+    or clone strategy objects. Callers must create a fresh instance for every
+    independent run. ResearchEngine follows this contract by calling its
+    strategy factory separately for each candidate and phase run.
+    """
 
     def on_bar(self, context: StrategyContext) -> Signal | None: ...
