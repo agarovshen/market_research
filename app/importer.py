@@ -152,7 +152,7 @@ def import_mt5_csv(file, filename: str, db):
                     "low": prices[2],
                     "close": prices[3],
                     "tick_volume": _parse_nonnegative_integer(tick_volume, "tick_volume", line_number),
-                    "volume": _parse_nonnegative_integer(volume, "volume", line_number),
+                    "volume": _parse_nonnegative_integer(volume, "volume", line_number, 9_223_372_036_854_775_807),
                     "spread": _parse_nonnegative_integer(spread, "spread", line_number),
                 }
             except (TypeError, ValueError) as error:
@@ -218,7 +218,12 @@ def _range(start, end, candles=None):
     return result
 
 
-def _parse_nonnegative_integer(value: str, field: str, line_number: int) -> int:
+def _parse_nonnegative_integer(
+    value: str,
+    field: str,
+    line_number: int,
+    maximum: int = 2_147_483_647,
+) -> int:
     """Parse integral MT5 counters without accepting truncation or negatives."""
     try:
         number = int(value)
@@ -228,8 +233,8 @@ def _parse_nonnegative_integer(value: str, field: str, line_number: int) -> int:
     # PostgreSQL INTEGER cannot represent before the database sees the batch.
     if number < 0:
         raise ValueError(f"Malformed market data at CSV line {line_number}: {field} must be nonnegative")
-    if number > 2_147_483_647:
+    if number > maximum:
         raise ValueError(
-            f"Malformed market data at CSV line {line_number}: {field} exceeds the supported PostgreSQL INTEGER range"
+            f"Malformed market data at CSV line {line_number}: {field} exceeds the supported PostgreSQL integer range"
         )
     return number

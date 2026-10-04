@@ -161,10 +161,20 @@ class CSVImporterTests(unittest.TestCase):
         self.assertEqual(result["rows_inserted"], 1)
         self.assertEqual((row.tick_volume, row.volume, row.spread), (2147483647, 57500000, 2147483647))
 
+    def test_volume_above_integer_range_is_imported_and_persisted(self):
+        volume = 2_273_010_000
+        payload = (HEADER +
+                   f"{START:%Y.%m.%d}\t{START:%H:%M:%S}\t1.1\t1.2\t1.0\t1.15\t10\t{volume}\t2\n")
+
+        result = import_mt5_csv(io.BytesIO(payload.encode()), "EURUSD.csv", self.session)
+
+        row = self.session.scalar(select(MarketData))
+        self.assertEqual(result["rows_inserted"], 1)
+        self.assertEqual(row.volume, volume)
+
     def test_numeric_overflow_fraction_negative_and_nan_roll_back(self):
         samples = (
             ("2147483648", "10", "2"),
-            ("10", "2147483648", "2"),
             ("10", "20", "2147483648"),
             ("1.5", "10", "2"),
             ("-1", "10", "2"),

@@ -1,5 +1,5 @@
 from datetime import datetime
-from sqlalchemy import ForeignKey, String, UniqueConstraint
+from sqlalchemy import BigInteger, ForeignKey, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 from app.database import Base
 
@@ -22,5 +22,5 @@ class MarketData(Base):
     low: Mapped[float]
     close: Mapped[float]
     tick_volume: Mapped[int]
-    volume: Mapped[int]
+    volume: Mapped[int] = mapped_column(BigInteger)
     spread: Mapped[int]
