@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
 from math import isfinite
+from typing import Any
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,6 +25,56 @@ class Side(str, Enum):
 class OrderAction(str, Enum):
     OPEN = "open"
     CLOSE = "close"
+
+
+class ExecutionEventType(str, Enum):
+    BAR = "bar"
+    SIGNAL = "signal"
+    ORDER_CREATED = "order_created"
+    EXECUTION = "execution"
+    POSITION_OPENED = "position_opened"
+    POSITION_CLOSED = "position_closed"
+    TRADE_CREATED = "trade_created"
+    PNL_CALCULATED = "pnl_calculated"
+
+
+@dataclass(frozen=True, slots=True)
+class ExecutionEvent:
+    """Immutable observation emitted by the canonical backtest lifecycle."""
+
+    sequence: int
+    timestamp: datetime
+    event_type: ExecutionEventType
+    bar_index: int | None
+    action: OrderAction | None = None
+    side: Side | None = None
+    order_id: int | None = None
+    trade_id: int | None = None
+    price: float | None = None
+    quantity: float | None = None
+    reason: str | None = None
+    details: tuple[tuple[str, Any], ...] = ()
+
+    def __str__(self) -> str:
+        fields = [f"[{self.event_type.value.upper()}] {self.timestamp.isoformat()}"]
+        if self.bar_index is not None:
+            fields.append(f"bar={self.bar_index}")
+        if self.action is not None:
+            fields.append(f"action={self.action.value.upper()}")
+        if self.side is not None:
+            fields.append(f"side={self.side.value.upper()}")
+        if self.order_id is not None:
+            fields.append(f"order_id={self.order_id}")
+        if self.trade_id is not None:
+            fields.append(f"trade_id={self.trade_id}")
+        if self.price is not None:
+            fields.append(f"price={self.price:g}")
+        if self.quantity is not None:
+            fields.append(f"quantity={self.quantity:g}")
+        if self.reason is not None:
+            fields.append(f"reason={self.reason}")
+        fields.extend(f"{key}={value}" for key, value in self.details)
+        return " ".join(fields)
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,3 +167,25 @@ class BacktestResult:
     orders: tuple[Order, ...]
     trades: tuple[Trade, ...]
     equity_curve: tuple[EquityPoint, ...]
+    execution_trace: tuple[ExecutionEvent, ...] = ()
+
+    def format_execution_trace(self) -> str:
+        """Return the ordered event stream in a stable, developer-readable form."""
+        return "\n".join(str(event) for event in self.execution_trace)
+
+    def format_trade_lifecycle(self, trade_sequence: int) -> str:
+        """Show this trade's observed events and authoritative canonical result."""
+        trade = next((item for item in self.trades if item.sequence == trade_sequence), None)
+        if trade is None:
+            raise ValueError(f"No completed trade with sequence {trade_sequence}")
+        events = tuple(event for event in self.execution_trace if event.trade_id == trade_sequence)
+        lines = [f"Trade #{trade_sequence} lifecycle"]
+        lines.extend(str(event) for event in events)
+        lines.extend((
+            "[CANONICAL TRADE]",
+            f"side={trade.side.value.upper()} quantity={trade.quantity:g}",
+            f"entry_time={trade.entry_time.isoformat()} entry_price={trade.entry_price:g}",
+            f"exit_time={trade.exit_time.isoformat()} exit_price={trade.exit_price:g}",
+            f"gross_pnl={trade.gross_pnl:g} net_pnl={trade.net_pnl:g}",
+        ))
+        return "\n".join(lines)

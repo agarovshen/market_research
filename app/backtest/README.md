@@ -21,12 +21,49 @@ It does not create another result type or calculate analysis metrics.
   and net PnL.
 - `equity_curve`: ordered tuple of `EquityPoint` records with timestamp, cash,
   unrealized PnL, and equity.
+- `execution_trace`: ordered immutable `ExecutionEvent` records observing the
+  same engine path. `format_execution_trace()` renders the complete stream;
+  `format_trade_lifecycle(sequence)` filters one completed trade and then
+  prints its canonical `Trade` fields.
 
 Signals use completed-bar context and are eligible for execution at the next
 bar's open. Configured final liquidation closes any remaining position at the
 last available bar close. Spread and slippage are reflected in fill prices and
 reported cost totals; commission is charged by the engine. These fields are
 the accounting source of truth for consumers, including the research chart.
+
+## Inspect the execution trace
+
+The trace is emitted by `BacktestEngine.run()` and is available on results
+returned directly by the engine or through `BacktestRunner`:
+
+```python
+result = BacktestRunner(repository).run(strategy=my_strategy, config=config)
+print(result.format_execution_trace())
+print(result.format_trade_lifecycle(1))
+```
+
+Events have monotonically increasing sequence numbers. A typical completed
+market trade records a `BAR`, `SIGNAL`, and `ORDER_CREATED`; on the next bar it
+records `EXECUTION` and `POSITION_OPENED`; later it records the close execution,
+`POSITION_CLOSED`, `PNL_CALCULATED`, and `TRADE_CREATED`. Fill prices, costs,
+timestamps, quantity, and PnL come from values already produced by the
+canonical engine path. The trace does not recalculate PnL. For close-at-end,
+the close order and execution are marked `end_of_data_liquidation`.
+
+`Signal` currently carries only action, optional side, and optional quantity;
+it has no strategy reason field. The trace reports that strategy reasoning is
+not exposed instead of inferring it. The engine currently has no stop/target
+management, pending stop/limit order triggers, cancellation/rejection states,
+or persistent position IDs. Accordingly, there are no SL/TP update or
+`ORDER_TRIGGERED`/`ORDER_CANCELLED` events. Market order intent is associated
+with the signal bar and its actual fill on the next bar; there is no separate
+active-order state. Trade sequence and order sequence provide lifecycle
+correlation.
+
+For trace diagnostics, `first_event_difference(expected, actual)` reports the
+first event number and differing field. This compares event streams only; the
+canonical `BacktestResult.trades` remains authoritative.
 
 ## Run a strategy against PostgreSQL history
 

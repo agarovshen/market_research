@@ -12,7 +12,8 @@ from app.analysis.models import (
     ReturnPoint, RiskStatistics, TradeStatistics,
 )
 from app.backtest.models import (
-    BacktestResult, EquityPoint, Order, OrderAction, Position, Side, Trade,
+    BacktestResult, EquityPoint, ExecutionEvent, ExecutionEventType, Order,
+    OrderAction, Position, Side, Trade,
 )
 from app.backtest.runner import BacktestRunConfig
 from app.research.models import (
@@ -36,7 +37,7 @@ _DATACLASSES = {
     cls.__name__: cls for cls in (
         AnalysisSettings, AnalysisResult, DrawdownPoint, DrawdownSummary,
         EquityAnalysisPoint, ReturnPoint, RiskStatistics, TradeStatistics,
-        BacktestResult, EquityPoint, Order, Position, Trade, BacktestRunConfig,
+        BacktestResult, EquityPoint, ExecutionEvent, Order, Position, Trade, BacktestRunConfig,
         BatchResearchResult, CandidateSelection, DateRange, ExperimentDefinition,
         FailureInfo, OutOfSampleResult, ResearchResult, SelectionRule,
         TrainTestSplit, WalkForwardConfig, WalkForwardResult, WalkForwardWindowResult,
@@ -47,7 +48,9 @@ _DATACLASSES = {
         SensitivityCell, WalkForwardAggregate, WalkForwardWindowAggregate,
     )
 }
-_ENUMS = {cls.__name__: cls for cls in (OrderAction, Side, ExperimentPhase, ExperimentStatus)}
+_ENUMS = {cls.__name__: cls for cls in (
+    OrderAction, Side, ExecutionEventType, ExperimentPhase, ExperimentStatus,
+)}
 
 
 def encode(value: Any) -> Any:
