@@ -419,7 +419,7 @@ class ResearchAPIIntegrationTests(unittest.TestCase):
             ResearchAnalysisRepository(StaleFirstGetSession(session)).save(advanced)
             self.assertEqual(advanced_store.get(advanced.analysis_id), advanced)
 
-    def test_latest_test_pointer_tracks_success_and_ignores_failed_test(self):
+    def test_latest_test_uses_existing_results_and_ignores_failed_test(self):
         from app.research.api import ResearchRunRequest, latest_test, run_research
         body = {
             "mode": "single", "strategy_id": "moving_average.sma_crossover",
@@ -452,11 +452,19 @@ class ResearchAPIIntegrationTests(unittest.TestCase):
             self.assertEqual(latest_test(session)["definition"]["experiment_id"],
                              second["definition"]["experiment_id"])
 
+            # Re-running an identical deterministic Test updates recency even
+            # though its canonical experiment identity and stored payload match.
+            repeated = run_research(ResearchRunRequest(**body), session)["results"][0]
+            self.assertEqual(repeated["definition"]["experiment_id"],
+                             first["definition"]["experiment_id"])
+            self.assertEqual(latest_test(session)["definition"]["experiment_id"],
+                             first["definition"]["experiment_id"])
+
             no_data = dict(newer, start="2035-01-01T00:00:00", end="2035-01-10T00:00:00")
             no_data_result = run_research(ResearchRunRequest(**no_data), session)["results"][0]
             self.assertEqual(no_data_result["status"], "failed")
             self.assertEqual(latest_test(session)["definition"]["experiment_id"],
-                             second["definition"]["experiment_id"])
+                             first["definition"]["experiment_id"])
 
             failed = dict(newer, parameters={"fast_period": 5, "slow_period": 2})
             from fastapi import HTTPException
@@ -464,7 +472,7 @@ class ResearchAPIIntegrationTests(unittest.TestCase):
                 run_research(ResearchRunRequest(**failed), session)
             self.assertEqual(rejected.exception.status_code, 422)
             self.assertEqual(latest_test(session)["definition"]["experiment_id"],
-                             second["definition"]["experiment_id"])
+                             first["definition"]["experiment_id"])
 
 
 if __name__ == "__main__":
