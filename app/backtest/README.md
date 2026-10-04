@@ -144,6 +144,22 @@ with SessionLocal() as session:
 print(result.final_equity, len(result.trades))
 ```
 
-The repository accepts `M1`, `M5`, `M15`, `H1`, `H4`, and `D1`. Higher
-timeframes are calendar-aligned aggregations of the existing market-data rows;
-the configured start/end filters apply to source rows before aggregation.
+The repository accepts `M1`, `M5`, `M15`, `H1`, `H4`, and `D1`. It is the
+shared M1-to-timeframe path for `BacktestRunner` and the chart endpoint. The
+chart uses `MarketDataRepository.load(..., timeframe=...)` for OHLC values; its
+SQL bounds only limit the source range fetched for the chart window.
+
+Aggregation semantics follow the stored timestamp's calendar fields: M5/M15
+start at minute multiples within each hour, H1 at each hour, H4 at hours
+00/04/08/12/16/20 within each stored day, and D1 at midnight. Stored/imported
+timestamps are naive datetimes; no UTC or exchange-session conversion is
+applied, and DST is not separately interpreted. There are no session/day
+boundaries beyond the calendar buckets. Missing M1 rows are skipped without
+gap filling, so partial buckets—including an incomplete final bucket—are
+returned. The database's `(instrument_id, timestamp)` unique constraint
+rejects duplicate M1 timestamps. Source rows are ordered by timestamp then
+database id; each aggregate bar is labeled with its bucket-start timestamp and
+bars are returned in first-seen chronological bucket order. Configured
+start/end filters apply to source rows before aggregation. A centered chart
+window chooses the nearest available bucket (earlier bucket breaks ties) and
+then returns the requested surrounding bars.

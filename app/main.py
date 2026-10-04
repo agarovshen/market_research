@@ -9,6 +9,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from app.database import SessionLocal
 from app.importer import get_symbol,import_mt5_csv
 from app.models import Instrument,MarketData
+from app.backtest.data import MarketDataRepository
 from app.schemas import InstrumentCreate,InstrumentResponse
 from app.research.api import router as research_router
 app=FastAPI()
@@ -87,6 +88,7 @@ def get_market_data(symbol:str,timeframe:str="M1",limit:int=1000,center_timestam
         else:
             timeframe_minutes={"M5":5,"M15":15,"H1":60,"H4":240,"D1":1440}
             minutes=timeframe_minutes[timeframe]
+            repository=MarketDataRepository(db)
             bucket_expressions={
                 "M5":"date_trunc('hour',timestamp)+floor(extract(minute from timestamp)/5)*interval '5 minutes'",
                 "M15":"date_trunc('hour',timestamp)+floor(extract(minute from timestamp)/15)*interval '15 minutes'",
@@ -98,72 +100,45 @@ def get_market_data(symbol:str,timeframe:str="M1",limit:int=1000,center_timestam
             if center_timestamp:
                 start_timestamp=center_timestamp-timedelta(minutes=minutes*half*2)
                 end_timestamp=center_timestamp+timedelta(minutes=minutes*half*2)
-                query=text(f"""
-                    WITH candles AS (
-                        SELECT
-                            {bucket} AS bucket,
-                            (array_agg(open ORDER BY timestamp))[1] AS open,
-                            MAX(high) AS high,
-                            MIN(low) AS low,
-                            (array_agg(close ORDER BY timestamp DESC))[1] AS close,
-                            SUM(tick_volume) AS tick_volume,
-                            SUM(volume) AS volume,
-                            (array_agg(spread ORDER BY timestamp DESC))[1] AS spread
-                        FROM market_data
-                        WHERE instrument_id=:instrument_id
-                        AND timestamp>=:start_timestamp
-                        AND timestamp<=:end_timestamp
-                        GROUP BY bucket
-                    ),
-                    target AS (
-                        SELECT bucket
-                        FROM candles
-                        ORDER BY abs(extract(epoch FROM (bucket-:center_timestamp)))
-                        LIMIT 1
-                    ),
-                    before_candles AS (
-                        SELECT *
-                        FROM candles
-                        WHERE bucket<=(SELECT bucket FROM target)
-                        ORDER BY bucket DESC
-                        LIMIT :half
-                    ),
-                    after_candles AS (
-                        SELECT *
-                        FROM candles
-                        WHERE bucket>(SELECT bucket FROM target)
-                        ORDER BY bucket ASC
-                        LIMIT :after_limit
-                    )
-                    SELECT * FROM before_candles
-                    UNION ALL
-                    SELECT * FROM after_candles
-                    ORDER BY bucket ASC
-                """)
-                rows=db.execute(query,{"instrument_id":instrument.id,"start_timestamp":start_timestamp,"end_timestamp":end_timestamp,"center_timestamp":center_timestamp,"half":half,"after_limit":limit-half}).mappings().all()
+                candles=repository.load(instrument.id,start=start_timestamp,
+                                        end=end_timestamp,timeframe=timeframe)
+                if candles:
+                    target=min(range(len(candles)),key=lambda index:(
+                        abs((candles[index].timestamp-center_timestamp).total_seconds()),
+                        candles[index].timestamp))
+                    before=(candles[max(0,target-half+1):target+1] if half else ())
+                    after=candles[target+1:target+1+limit-half]
+                    candles=tuple(before)+tuple(after)
             else:
-                query=text(f"""
-                    WITH candles AS (
-                        SELECT
-                            {bucket} AS bucket,
-                            (array_agg(open ORDER BY timestamp))[1] AS open,
-                            MAX(high) AS high,
-                            MIN(low) AS low,
-                            (array_agg(close ORDER BY timestamp DESC))[1] AS close,
-                            SUM(tick_volume) AS tick_volume,
-                            SUM(volume) AS volume,
-                            (array_agg(spread ORDER BY timestamp DESC))[1] AS spread
+                if db.bind.dialect.name == "postgresql":
+                    # Use SQL only to find the earliest of the latest occupied
+                    # buckets. OHLC aggregation itself always goes through the
+                    # canonical repository path shared with BacktestRunner.
+                    query=text(f"""
+                        SELECT {bucket} AS bucket
                         FROM market_data
                         WHERE instrument_id=:instrument_id
                         GROUP BY bucket
-                    )
-                    SELECT bucket,open,high,low,close,tick_volume,volume,spread
-                    FROM candles
-                    ORDER BY bucket DESC
-                    LIMIT :limit
-                """)
-                rows=list(reversed(db.execute(query,{"instrument_id":instrument.id,"limit":limit}).mappings().all()))
-            data=[{"timestamp":row["bucket"].isoformat(),"open":row["open"],"high":row["high"],"low":row["low"],"close":row["close"],"tick_volume":row["tick_volume"],"volume":row["volume"],"spread":row["spread"]} for row in rows]
+                        ORDER BY bucket DESC
+                        LIMIT :limit
+                    """)
+                    latest=db.execute(query,{"instrument_id":instrument.id,
+                                             "limit":limit}).mappings().all()
+                    if latest:
+                        earliest=min(row["bucket"] for row in latest)
+                        candles=repository.load(instrument.id,start=earliest,
+                                                timeframe=timeframe)
+                    else:
+                        candles=()
+                else:
+                    # Keep the repository path usable by SQLite-backed tests and
+                    # development databases, which have no PostgreSQL bucket SQL.
+                    candles=repository.load(instrument.id,timeframe=timeframe)
+                candles=candles[-limit:]
+            data=[{"timestamp":bar.timestamp.isoformat(),"open":bar.open,
+                   "high":bar.high,"low":bar.low,"close":bar.close,
+                   "tick_volume":bar.tick_volume,"volume":bar.volume,
+                   "spread":bar.spread} for bar in candles]
         return {"symbol":instrument.symbol,"timeframe":timeframe,"data":data}
     finally:
         db.close()
