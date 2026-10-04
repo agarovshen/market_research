@@ -246,7 +246,9 @@ class BacktestEngine:
                                quantity=position.quantity, stop_loss=position.stop_loss)
                         pending_stop = None
 
-            signal = strategy.on_bar(StrategyContext(i, BarHistory(data, i + 1), bar))
+            pending_order = orders[pending_stop[3] - 1] if pending_stop is not None else None
+            signal = strategy.on_bar(StrategyContext(i, BarHistory(data, i + 1), bar,
+                                                     position, pending_order))
             if signal is not None:
                 if signal.action is OrderAction.MODIFY_STOP:
                     record(ExecutionEventType.SIGNAL, bar.timestamp, i,

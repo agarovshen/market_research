@@ -1,14 +1,18 @@
 from dataclasses import dataclass
 from typing import Protocol, Sequence, overload
 
-from app.backtest.models import Bar, Signal
+from app.backtest.models import Bar, Order, Position, Signal
 
 
 @dataclass(frozen=True, slots=True)
 class StrategyContext:
+    """Completed-bar input plus a read-only snapshot of canonical engine state."""
+
     index: int
     history: Sequence[Bar]
     bar: Bar
+    position: Position | None = None
+    pending_order: Order | None = None
 
 
 class BarHistory(Sequence[Bar]):

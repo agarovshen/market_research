@@ -76,6 +76,12 @@ visible in the trace. There are no TP, cancellation/expiry, rejection, or
 persistent position ID events. Trade sequence and order sequence provide
 lifecycle correlation.
 
+The registered `breakout.h4_two_candle` strategy is implemented in
+`app/strategies/h4_breakout.py`. It expects H4 bars from the caller, emits only
+STOP entry intents and explicit stop updates, and reads canonical position and
+pending-order snapshots from `StrategyContext`. It does not implement fills
+or PnL.
+
 OHLC bars do not reveal the true intrabar path. These deterministic rules make
 the tested execution repeatable; they do not reconstruct tick-level execution
 or broker behavior. If an entry and its stop are both inside one candle's

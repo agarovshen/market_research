@@ -29,6 +29,12 @@ does not establish correctness for every input or strategy.
   deterministic repeats; and result persistence round trips.
 - Selected advanced calculations under explicit small fixtures, including
   seeded Monte Carlo repeatability and drawdown arithmetic.
+- The registered H4 two-candle breakout strategy against a separate primitive
+  reference: strict directional/breakout rules, inclusive 50% body boundary,
+  STOP and initial SL values, trailing update from the previous completed
+  candle, BUY/SELL lifecycle arithmetic, invalid setups, future-prefix
+  invariance, and canonical trace/trade reconciliation. These fixtures assume
+  the caller supplies H4 bars; the generic engine does not infer timeframe.
 - Structured first-divergence output. It identifies the first differing trade
   field, shows equal fields before it, gives expected and actual values, and
   marks later fields in that trade not comparable. Numeric absolute/relative
@@ -93,6 +99,10 @@ implementation under test. For a differential fixture, give the primitive
 reference calculation its own events and compare its output with a projection
 of production output. Do not build the expected mapping from production
 trade/PnL fields.
+
+`reference_h4_breakout.py` separately calculates the two-candle rule and one
+deterministic STOP/stop-loss lifecycle from primitive dictionaries. It imports
+no production models, strategy code, execution helpers, or PnL functions.
 
 Seeded property tests should assert mathematical relationships guaranteed by
 the configured model (direction, scaling, costs, equity, and nonnegative
