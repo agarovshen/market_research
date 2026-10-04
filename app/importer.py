@@ -2,6 +2,7 @@
 
 import csv
 import io
+import math
 import re
 from datetime import datetime
 
@@ -80,9 +81,10 @@ def import_mt5_csv(file, filename: str, db):
         existing_range_before = _range(existing_before[0], existing_before[1])
 
         batch = []
-        batch_timestamps = set()
+        seen_timestamps = set()
         inserted = 0
         source_rows = 0
+        duplicate_csv = 0
         first_timestamp = None
         last_timestamp = None
         imported_intervals = []
@@ -130,7 +132,6 @@ def import_mt5_csv(file, filename: str, db):
                 else:
                     close_import_interval()
             batch.clear()
-            batch_timestamps.clear()
 
         for line_number, values in enumerate(reader, start=2):
             if not values or all(not value.strip() for value in values):
@@ -140,27 +141,33 @@ def import_mt5_csv(file, filename: str, db):
             date_value, time_value, open_value, high_value, low_value, close_value, tick_volume, volume, spread = values
             try:
                 timestamp = datetime.strptime(f"{date_value} {time_value}", "%Y.%m.%d %H:%M:%S")
+                prices = [float(value) for value in (open_value, high_value, low_value, close_value)]
+                if not all(math.isfinite(price) for price in prices):
+                    raise ValueError("OHLC values must be finite numbers")
                 row = {
                     "instrument_id": instrument.id,
                     "timestamp": timestamp,
-                    "open": float(open_value),
-                    "high": float(high_value),
-                    "low": float(low_value),
-                    "close": float(close_value),
-                    "tick_volume": int(tick_volume),
-                    "volume": int(volume),
-                    "spread": int(spread),
+                    "open": prices[0],
+                    "high": prices[1],
+                    "low": prices[2],
+                    "close": prices[3],
+                    "tick_volume": _parse_nonnegative_integer(tick_volume, "tick_volume", line_number),
+                    "volume": _parse_nonnegative_integer(volume, "volume", line_number),
+                    "spread": _parse_nonnegative_integer(spread, "spread", line_number),
                 }
             except (TypeError, ValueError) as error:
+                if str(error).startswith("Malformed market data at CSV line"):
+                    raise
                 raise ValueError(f"Malformed market data at CSV line {line_number}: {error}") from error
 
             source_rows += 1
             first_timestamp = timestamp if first_timestamp is None else min(first_timestamp, timestamp)
             last_timestamp = timestamp if last_timestamp is None else max(last_timestamp, timestamp)
-            if timestamp in batch_timestamps:
+            if timestamp in seen_timestamps:
+                duplicate_csv += 1
                 continue
+            seen_timestamps.add(timestamp)
             batch.append(row)
-            batch_timestamps.add(timestamp)
             if len(batch) >= BATCH_SIZE:
                 flush_batch()
 
@@ -174,7 +181,7 @@ def import_mt5_csv(file, filename: str, db):
             select(func.min(MarketData.timestamp), func.max(MarketData.timestamp))
             .where(MarketData.instrument_id == instrument.id)
         ).one()
-        rows_skipped = source_rows - inserted
+        rows_skipped_existing = source_rows - duplicate_csv - inserted
         return {
             "symbol": symbol,
             "requested_range": _range(first_timestamp, last_timestamp),
@@ -182,13 +189,18 @@ def import_mt5_csv(file, filename: str, db):
             "imported_intervals": imported_intervals,
             "source_rows": source_rows,
             "rows_inserted": inserted,
-            "rows_skipped_existing": rows_skipped,
+            "rows_skipped_existing": rows_skipped_existing,
+            "rows_skipped_duplicate_csv": duplicate_csv,
+            "invalid_rows": 0,
             "already_complete": inserted == 0,
             "final_range": _range(final_range_row[0], final_range_row[1]),
         }
     except csv.Error as error:
         db.rollback()
         raise ValueError(f"Malformed CSV: {error}") from error
+    except UnicodeError as error:
+        db.rollback()
+        raise ValueError("CSV file must be valid UTF-8 text") from error
     except Exception:
         db.rollback()
         raise
@@ -204,3 +216,20 @@ def _range(start, end, candles=None):
     if candles is not None:
         result["candles"] = candles
     return result
+
+
+def _parse_nonnegative_integer(value: str, field: str, line_number: int) -> int:
+    """Parse integral MT5 counters without accepting truncation or negatives."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"Malformed market data at CSV line {line_number}: {field} must be an integer") from error
+    # int('1.5') fails; an explicit range check catches values the target
+    # PostgreSQL INTEGER cannot represent before the database sees the batch.
+    if number < 0:
+        raise ValueError(f"Malformed market data at CSV line {line_number}: {field} must be nonnegative")
+    if number > 2_147_483_647:
+        raise ValueError(
+            f"Malformed market data at CSV line {line_number}: {field} exceeds the supported PostgreSQL INTEGER range"
+        )
+    return number

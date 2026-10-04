@@ -139,6 +139,69 @@ class CSVImporterTests(unittest.TestCase):
         self.assertEqual(len(self.existing_minutes()), 3)
         self.assertEqual(result["rows_skipped_existing"], 1)
 
+    def test_duplicate_timestamps_inside_csv_are_counted_once(self):
+        timestamps = [START, START + timedelta(minutes=1), START]
+
+        result = import_mt5_csv(csv_bytes(timestamps), "EURUSD.csv", self.session)
+
+        self.assertEqual(result["rows_inserted"], 2)
+        self.assertEqual(result["rows_skipped_existing"], 0)
+        self.assertEqual(result["rows_skipped_duplicate_csv"], 1)
+        self.assertEqual(result["invalid_rows"], 0)
+        self.assertEqual(self.session.scalar(select(func.count()).select_from(MarketData)), 2)
+
+    def test_large_market_volume_and_integer_boundary_are_preserved(self):
+        timestamp = START
+        payload = (HEADER +
+                   f"{timestamp:%Y.%m.%d}\t{timestamp:%H:%M:%S}\t1.1\t1.2\t1.0\t1.15\t2147483647\t57500000\t2147483647\n")
+
+        result = import_mt5_csv(io.BytesIO(payload.encode()), "EURUSD.csv", self.session)
+
+        row = self.session.scalar(select(MarketData))
+        self.assertEqual(result["rows_inserted"], 1)
+        self.assertEqual((row.tick_volume, row.volume, row.spread), (2147483647, 57500000, 2147483647))
+
+    def test_numeric_overflow_fraction_negative_and_nan_roll_back(self):
+        samples = (
+            ("2147483648", "10", "2"),
+            ("10", "2147483648", "2"),
+            ("10", "20", "2147483648"),
+            ("1.5", "10", "2"),
+            ("-1", "10", "2"),
+            ("1", "10", "NaN"),
+        )
+        for tick_volume, volume, spread in samples:
+            payload = (HEADER +
+                       f"{START:%Y.%m.%d}\t{START:%H:%M:%S}\t1.1\t1.2\t1.0\t1.15\t{tick_volume}\t{volume}\t{spread}\n")
+            with self.subTest(values=(tick_volume, volume, spread)):
+                with self.assertRaises(ValueError):
+                    import_mt5_csv(io.BytesIO(payload.encode()), "GBPUSD.csv", self.session)
+                self.assertIsNone(self.session.scalar(select(Instrument).where(Instrument.symbol == "GBPUSD")))
+                self.assertEqual(self.session.scalar(select(func.count()).select_from(MarketData)), 0)
+
+    def test_invalid_timestamp_and_null_prohibited_fields_fail_atomically(self):
+        malformed_rows = (
+            "not-a-date\t00:00:00\t1.1\t1.2\t1.0\t1.15\t1\t2\t0",
+            f"{START:%Y.%m.%d}\t{START:%H:%M:%S}\t\t1.2\t1.0\t1.15\t1\t2\t0",
+        )
+        for row in malformed_rows:
+            with self.subTest(row=row):
+                payload = (HEADER + row + "\n").encode()
+                with self.assertRaises(ValueError):
+                    import_mt5_csv(io.BytesIO(payload), "GBPUSD.csv", self.session)
+                self.assertIsNone(self.session.scalar(select(Instrument).where(Instrument.symbol == "GBPUSD")))
+
+    def test_duplicate_csv_across_batch_boundary_is_idempotent_and_counted(self):
+        timestamps = [START + timedelta(minutes=i) for i in range(BATCH_SIZE)]
+        timestamps.append(timestamps[0])
+
+        result = import_mt5_csv(csv_bytes(timestamps), "EURUSD.csv", self.session)
+
+        self.assertEqual(result["rows_inserted"], BATCH_SIZE)
+        self.assertEqual(result["rows_skipped_duplicate_csv"], 1)
+        self.assertEqual(result["rows_skipped_existing"], 0)
+        self.assertEqual(self.session.scalar(select(func.count()).select_from(MarketData)), BATCH_SIZE)
+
     def test_different_symbols_have_independent_timestamp_identity(self):
         timestamp = START
         self.session.add(candle(timestamp))
