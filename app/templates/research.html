@@ -44,7 +44,13 @@
         <section class="trade-history" aria-labelledby="trade-history-title">
           <div class="result-heading"><div><h3 id="trade-history-title">Trade History</h3><p id="trade-result-context" class="hint">Select a completed experiment to inspect its trades.</p></div><button id="inspect-trades" type="button" disabled>View on price chart</button></div>
           <p id="trade-empty" class="hint">No completed trades.</p>
-          <div class="table-wrap"><table><thead><tr><th>#</th><th>Side</th><th>Entry time</th><th>Exit time</th><th>Entry</th><th>Exit</th><th>Quantity</th><th>Gross P&amp;L</th><th>Net P&amp;L</th><th>Commission</th><th>Duration</th><th>Chart</th></tr></thead><tbody id="trade-records"></tbody></table></div>
+          <div class="table-wrap"><table><thead><tr><th>#</th><th>Side</th><th>Entry time</th><th>Exit time</th><th>Entry</th><th>Exit</th><th>Quantity</th><th>Gross P&amp;L</th><th>Net P&amp;L</th><th>Entry / exit commission</th><th>Chart</th></tr></thead><tbody id="trade-records"></tbody></table></div>
+        </section>
+        <section class="execution-log" aria-labelledby="execution-log-title">
+          <div class="result-heading"><div><h3 id="execution-log-title">Order &amp; Strategy Log</h3><p id="execution-log-context" class="hint">Select a completed experiment to inspect its execution trace.</p></div></div>
+          <p id="execution-log-empty" class="hint">No execution events.</p>
+          <p id="execution-log-warning" class="hint" role="status" hidden></p>
+          <div class="table-wrap"><table><thead><tr><th>#</th><th>Time</th><th>Bar</th><th>Event</th><th>Side</th><th>Order</th><th>Trade</th><th>Price</th><th>Quantity</th><th>Trigger</th><th>Stop loss</th><th>Details</th></tr></thead><tbody id="execution-log-records"></tbody></table></div>
         </section>
         <div class="advanced-tools" id="advanced-tools" hidden>
           <label>Metric<select id="advanced-metric"><option value="total_return">Total return</option><option value="trades.net_profit">Net profit</option><option value="risk.sharpe_ratio">Sharpe</option></select></label>
@@ -69,6 +75,7 @@
   <script src="/static/js/research-state.js"></script>
   <script src="/static/js/research-parameters.js"></script>
   <script src="/static/js/trade-history.js"></script>
+  <script src="/static/js/execution-log.js"></script>
   <script src="/static/js/research-presentation.js"></script>
   <script src="/static/js/research-workspace.js"></script>
 </body>

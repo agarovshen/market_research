@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const Research = require("../app/static/js/research-data.js");
 const Parameters = require("../app/static/js/research-parameters.js");
 const TradeHistory = require("../app/static/js/trade-history.js");
+const ExecutionLog = require("../app/static/js/execution-log.js");
 
 const rows = [
     { timestamp: "2024-01-01T00:00:00Z", open: 10, high: 11, low: 9, close: 10, tick_volume: 4, volume: 40, spread: 0.2 },
@@ -26,8 +27,32 @@ test("centered data selection and endpoint params preserve a historical anchor",
     const anchor = Research.timestamp(rows[2].timestamp);
     assert.deepEqual(Research.centeredSlice(rows, 3, anchor), rows.slice(1, 4));
     const params = Research.marketDataParams("EURUSD", "M15", 5000, anchor);
-    assert.equal(params.get("center_timestamp"), new Date(anchor).toISOString());
+    const localAnchor = new Date(anchor);
+    const pad = value => String(value).padStart(2, "0");
+    assert.equal(params.get("center_timestamp"),
+        `${localAnchor.getFullYear()}-${pad(localAnchor.getMonth() + 1)}-${pad(localAnchor.getDate())}` +
+        `T${pad(localAnchor.getHours())}:${pad(localAnchor.getMinutes())}:${pad(localAnchor.getSeconds())}.` +
+        String(localAnchor.getMilliseconds()).padStart(3, "0"));
     assert.equal(params.get("timeframe"), "M15");
+});
+
+test("individual trade handoff focuses its canonical period while general view remains separate", () => {
+    const trade = { id: 17, entry_time: rows[1].timestamp, exit_time: rows[3].timestamp };
+    const result = { definition: { symbol: "GBPUSD", timeframe: "H4" }, backtest_result: {
+        orders: [], trades: [], execution_trace: [],
+    } };
+    const focus = TradeHistory.chartHandoff(result, trade, true);
+    assert.equal(focus.trade_id, 17);
+    assert.deepEqual(focus.focus_range, { start: trade.entry_time, end: trade.exit_time });
+    assert.equal(focus.timeframe, "H4");
+    assert.equal(focus.center_timestamp, undefined);
+    const params = Research.marketDataParams("GBPUSD", focus.timeframe, 1000, null, focus.focus_range);
+    assert.equal(params.get("focus_start"), trade.entry_time);
+    assert.equal(params.get("focus_end"), trade.exit_time);
+
+    const general = TradeHistory.chartHandoff(result, trade, false);
+    assert.equal(general.center_timestamp, trade.entry_time);
+    assert.equal(general.focus_range, undefined);
 });
 
 test("selection, freeze toggling, and reset retain the historical point", () => {
@@ -112,9 +137,11 @@ test("trade history preserves canonical fields and exact chart marker coordinate
     assert.equal(trades[0].entry_price, 10.25);
     assert.equal(trades[0].exit_price, 10.5);
     assert.equal(trades[0].net_pnl, 0.4);
+    assert.equal(trades[0].entry_commission, 0.05);
+    assert.equal(trades[0].exit_commission, 0.05);
+    assert.equal(trades[0].duration_ms, undefined);
     assert.equal(trades[1].side, "SELL · SHORT");
     assert.equal(trades[1].quantity, null);
-    assert.equal(trades[1].commission, 0);
     assert.deepEqual(TradeHistory.markersFromTrades(trades), [
         { trade_id: 7, kind: "entry", side: "BUY · LONG", timestamp: Date.parse(rows[0].timestamp), price: 10.25 },
         { trade_id: 7, kind: "exit", side: "BUY · LONG", timestamp: Date.parse(rows[0].timestamp), price: 10.5 },
@@ -126,7 +153,56 @@ test("trade history preserves canonical fields and exact chart marker coordinate
 test("empty and malformed BacktestResult trade data is explicit and never stale", () => {
     assert.deepEqual(TradeHistory.tradesFromBacktest({ trades: [] }), []);
     assert.deepEqual(TradeHistory.tradesFromBacktest({ trades: null }), []);
-    assert.throws(() => TradeHistory.tradesFromBacktest({ trades: [{ side: "long" }] }), /canonical entry\/exit/);
+    assert.deepEqual(TradeHistory.readTrades({ trades: [{ side: "long" }] }),
+        { trades: [], malformedCount: 1 });
+});
+
+test("all trades are retained and malformed trade records are isolated", () => {
+    const source = Array.from({ length: 52 }, (_, index) => ({
+        sequence: index + 1, side: "long", entry_time: rows[0].timestamp,
+        exit_time: rows[1].timestamp, entry_price: 10, exit_price: 12,
+    }));
+    const complete = TradeHistory.readTrades({ trades: source });
+    assert.equal(complete.trades.length, 52);
+    assert.equal(complete.malformedCount, 0);
+    const mixed = TradeHistory.readTrades({ trades: [source[0], { side: "long" }, source[1]] });
+    assert.deepEqual(mixed.trades.map(trade => trade.id), [1, 2]);
+    assert.equal(mixed.malformedCount, 1);
+});
+
+test("main workspace renders a persistent full execution trace in canonical order", () => {
+    const html = fs.readFileSync("app/templates/research.html", "utf8");
+    const workspace = fs.readFileSync("app/static/js/research-workspace.js", "utf8");
+    assert.match(html, /id="execution-log-title">Order &amp; Strategy Log/);
+    assert.match(html, /id="execution-log-empty"[^>]*>No execution events\./);
+    assert.match(html, /id="trade-empty"[^>]*>No completed trades\./);
+    assert.match(workspace, /renderExecutionLog\(row\|\|null\)/);
+    assert.match(workspace, /openPriceChart\(row,trade,true\)/);
+    assert.match(workspace, /openPriceChart\(row,trade,false\)/);
+
+    const raw = [
+        { sequence: 1, timestamp: rows[0].timestamp, event_type: "bar", bar_index: 0, details: [["low", 9]] },
+        { sequence: 2, timestamp: rows[0].timestamp, event_type: "order_created", order_id: 5,
+            order_type: "stop", reason: "stop_entry_pending" },
+        { sequence: 3, timestamp: rows[0].timestamp, event_type: "order_pending", order_id: 5,
+            reason: "eligible_next_bar" },
+        { sequence: 4, timestamp: rows[1].timestamp, event_type: "order_triggered", order_id: 5,
+            trigger_price: 12 },
+        { sequence: 5, timestamp: rows[1].timestamp, event_type: "execution", order_id: 5, price: 12 },
+        { sequence: 6, timestamp: rows[1].timestamp, event_type: "position_opened", trade_id: 7, stop_loss: 9 },
+        { sequence: 7, timestamp: rows[2].timestamp, event_type: "stop_updated", trade_id: 7, stop_loss: 10,
+            details: [["previous_stop_loss", 9]] },
+        { sequence: 8, timestamp: rows[3].timestamp, event_type: "position_closed", trade_id: 7 },
+        { sequence: 9, timestamp: rows[3].timestamp, event_type: "pnl_calculated", trade_id: 7 },
+        { sequence: 10, timestamp: rows[3].timestamp, event_type: "trade_created", trade_id: 7 },
+    ];
+    const parsed = ExecutionLog.readEvents({ execution_trace: raw });
+    assert.deepEqual(parsed.events.map(event => event.sequence), raw.map(event => event.sequence));
+    assert.equal(parsed.events[2].event_type, "order_pending");
+    assert.equal(ExecutionLog.detailText(parsed.events[6]), "previous_stop_loss=9");
+    const badEvent = ExecutionLog.readEvents({ execution_trace: [raw[0], null, raw[1]] });
+    assert.deepEqual(badEvent.events.map(event => event.sequence), [1, 2]);
+    assert.equal(badEvent.malformedCount, 1);
 });
 
 test("selected research result is phase-specific and switching to an empty result clears trades", () => {
@@ -165,8 +241,10 @@ test("BacktestResult transformation maps orders, trade details, and equity field
     assert.equal(result.orders[0].marketAction, "BUY");
     assert.equal(result.orders[1].label, "LONG EXIT");
     assert.equal(result.orders[1].marketAction, "SELL");
-    assert.equal(result.trades[0].returnPct, 2.8 / 20.2 * 100);
-    assert.equal(result.trades[0].commission, 0.8);
+    assert.equal(result.trades[0].entryCommission, 0.4);
+    assert.equal(result.trades[0].exitCommission, 0.4);
+    assert.equal(result.trades[0].returnPct, undefined);
+    assert.equal(result.trades[0].durationMs, undefined);
     assert.equal(result.trades[0].spreadCost, 0.4);
     assert.equal(result.trades[0].slippage, 0.2);
     assert.equal(result.equity[1].equity, 1002.8);

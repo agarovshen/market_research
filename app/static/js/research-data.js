@@ -86,9 +86,20 @@
         return data.slice(start, start + length);
     }
 
-    function marketDataParams(symbol, timeframe, limit, anchor) {
+    function marketDataParams(symbol, timeframe, limit, anchor, focusRange = null) {
         const params = new URLSearchParams({ symbol, timeframe, limit: String(limit) });
-        if (anchor != null) params.set("center_timestamp", new Date(anchor).toISOString());
+        if (anchor != null) {
+            const date = new Date(anchor);
+            const pad = value => String(value).padStart(2, "0");
+            const wallTime = `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}` +
+                `T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}.` +
+                String(date.getMilliseconds()).padStart(3, "0");
+            params.set("center_timestamp", wallTime);
+        }
+        if (focusRange?.start && focusRange?.end) {
+            params.set("focus_start", focusRange.start);
+            params.set("focus_end", focusRange.end);
+        }
         return params;
     }
 
@@ -134,32 +145,33 @@
             cost.slippage += order.slippageCost;
             fillCosts.set(key, cost);
         }
-        const trades = rawTrades.map((trade, index) => {
+        const trades = rawTrades.flatMap((trade, index) => {
+            if (!trade || typeof trade !== "object") return [];
             const entryTime = timestamp(trade.entry_time);
             const exitTime = timestamp(trade.exit_time);
             const side = String(trade.side || "").toLowerCase();
+            const entryPrice = finiteOrNull(trade.entry_price);
+            const exitPrice = finiteOrNull(trade.exit_price);
+            if (entryTime === null || exitTime === null || entryPrice === null || exitPrice === null ||
+                !["long", "short"].includes(side)) return [];
             const entryCosts = fillCosts.get(`${entryTime}:${side}:open`) || { spread: 0, slippage: 0 };
             const exitCosts = fillCosts.get(`${exitTime}:${side}:close`) || { spread: 0, slippage: 0 };
-            const commission = Number(trade.entry_commission || 0) + Number(trade.exit_commission || 0);
             const quantity = Number(trade.quantity ?? trade.qty);
-            const entryPrice = Number(trade.entry_price);
-            const exitPrice = Number(trade.exit_price);
             const grossPnl = Number(trade.gross_pnl);
             const netPnl = Number(trade.net_pnl);
-            return {
+            return [{
                 id: trade.sequence ?? trade.id ?? index + 1,
                 side, direction: side.toUpperCase(), quantity,
                 entryTime, exitTime, entryPrice, exitPrice,
-                grossPnl, netPnl, commission,
+                grossPnl, netPnl,
+                entryCommission: finiteOrNull(trade.entry_commission),
+                exitCommission: finiteOrNull(trade.exit_commission),
                 spreadCost: entryCosts.spread + exitCosts.spread,
                 slippage: entryCosts.slippage + exitCosts.slippage,
-                returnPct: entryPrice && quantity ? netPnl / (Math.abs(entryPrice * quantity)) * 100 : null,
-                durationMs: entryTime !== null && exitTime !== null ? exitTime - entryTime : null,
                 winning: netPnl >= 0,
                 source: trade,
-            };
-        }).filter(trade => trade.entryTime !== null && trade.exitTime !== null)
-            .sort((a, b) => a.entryTime - b.entryTime || a.id - b.id);
+            }];
+        }).sort((a, b) => a.entryTime - b.entryTime || a.id - b.id);
 
         const equity = (result.equity_curve || []).map(point => ({
             x: timestamp(point.timestamp),

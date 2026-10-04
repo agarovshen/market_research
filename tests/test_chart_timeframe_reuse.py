@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 os.environ.setdefault("DATABASE_URL", "sqlite://")
 
@@ -90,4 +90,82 @@ def test_chart_and_backtest_use_the_same_h4_and_d1_repository_bars(monkeypatch):
         item["timestamp"] for item in h4_chart["data"]
     ]
     assert result.trades == ()
+    engine.dispose()
+
+
+def test_trade_focus_range_keeps_trade_candles_and_available_context(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    with sessions() as session:
+        instrument = Instrument(symbol="EURUSD", type="forex")
+        session.add(instrument)
+        session.flush()
+        for index, minute in enumerate(TIMES):
+            open_, high, low, close = OHLC[index]
+            session.add(MarketData(
+                instrument_id=instrument.id,
+                timestamp=START + timedelta(minutes=minute),
+                open=open_, high=high, low=low, close=close,
+                tick_volume=index + 1, volume=(index + 1) * 10,
+                spread=index + 2,
+            ))
+        session.commit()
+        canonical = MarketDataRepository(session).load("EURUSD", timeframe="H4")
+
+    monkeypatch.setattr("app.main.SessionLocal", sessions)
+    payload = lambda bars: [{"timestamp": bar.timestamp.isoformat(), "open": bar.open,
+                             "high": bar.high, "low": bar.low, "close": bar.close,
+                             "tick_volume": bar.tick_volume, "volume": bar.volume,
+                             "spread": bar.spread} for bar in bars]
+
+    # A trade near the first available candle has no earlier context, but its
+    # entry, exit and following available context are still returned.
+    first = get_market_data("EURUSD", timeframe="H4", limit=8,
+                            focus_start=canonical[0].timestamp,
+                            focus_end=canonical[1].timestamp)["data"]
+    assert first == payload(canonical[:3])
+
+    # A same-bucket trade remains navigable; the neighboring bars are present.
+    same_bucket = get_market_data("EURUSD", timeframe="H4", limit=8,
+                                  focus_start=canonical[1].timestamp,
+                                  focus_end=canonical[1].timestamp)["data"]
+    assert same_bucket == payload(canonical[:3])
+
+    # A trade ending at the last available bar keeps both trade candles even
+    # when the bounded context window contains no additional candle.
+    last = get_market_data("EURUSD", timeframe="H4", limit=8,
+                           focus_start=canonical[-2].timestamp,
+                           focus_end=canonical[-1].timestamp)["data"]
+    assert last == payload(canonical[-2:])
+    engine.dispose()
+
+
+def test_legacy_utc_center_timestamp_does_not_break_naive_h1_data(monkeypatch):
+    engine = create_engine("sqlite://")
+    Base.metadata.create_all(engine)
+    sessions = sessionmaker(bind=engine)
+    with sessions() as session:
+        instrument = Instrument(symbol="EURUSD", type="forex")
+        session.add(instrument)
+        session.flush()
+        for index, minute in enumerate(TIMES):
+            open_, high, low, close = OHLC[index]
+            session.add(MarketData(
+                instrument_id=instrument.id,
+                timestamp=START + timedelta(minutes=minute),
+                open=open_, high=high, low=low, close=close,
+                tick_volume=index + 1, volume=(index + 1) * 10,
+                spread=index + 2,
+            ))
+        session.commit()
+
+    monkeypatch.setattr("app.main.SessionLocal", sessions)
+    # The old browser client sent ISO UTC (`Z`) while the repository stores
+    # imported wall-clock timestamps without timezone information.
+    center = (START + timedelta(minutes=242)).replace(tzinfo=timezone.utc)
+    response = get_market_data("EURUSD", timeframe="H1", limit=5,
+                               center_timestamp=center)
+    assert response["data"]
+    assert all("+00:00" not in candle["timestamp"] for candle in response["data"])
     engine.dispose()

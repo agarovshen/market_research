@@ -44,11 +44,22 @@ def import_csv(csv_file:UploadFile=File(...)):
     finally:
         db.close()
 @app.get("/market-data")
-def get_market_data(symbol:str,timeframe:str="M1",limit:int=1000,center_timestamp:datetime|None=None):
+def get_market_data(symbol:str,timeframe:str="M1",limit:int=1000,center_timestamp:datetime|None=None,
+                    focus_start:datetime|None=None,focus_end:datetime|None=None):
     timeframe=timeframe.upper()
     valid_timeframes={"M1","M5","M15","H1","H4","D1"}
     if timeframe not in valid_timeframes:
         return {"symbol":symbol.upper(),"timeframe":timeframe,"data":[]}
+    # Imported market-data timestamps are timezone-naive wall-clock values.
+    # Older chart clients serialize these anchors with a UTC suffix (`Z`);
+    # keep their displayed wall-clock fields when comparing against candles.
+    center_timestamp=_market_wall_time(center_timestamp)
+    focus_start=_market_wall_time(focus_start)
+    focus_end=_market_wall_time(focus_end)
+    if (focus_start is None) != (focus_end is None):
+        raise HTTPException(status_code=422,detail="Both focus_start and focus_end are required")
+    if focus_start is not None and focus_end < focus_start:
+        raise HTTPException(status_code=422,detail="focus_end must be at or after focus_start")
     limit=max(1,min(limit,5000))
     db=SessionLocal()
     try:
@@ -56,7 +67,24 @@ def get_market_data(symbol:str,timeframe:str="M1",limit:int=1000,center_timestam
         if instrument is None:
             return {"symbol":symbol.upper(),"timeframe":timeframe,"data":[]}
         half=limit//2
-        if timeframe=="M1":
+        if focus_start is not None:
+            # The selected trade interval is kept intact and surrounded by
+            # context sized from the existing chart bar-count setting. Bars
+            # still come from the canonical repository aggregation path.
+            timeframe_minutes={"M1":1,"M5":5,"M15":15,"H1":60,"H4":240,"D1":1440}
+            step=timedelta(minutes=timeframe_minutes[timeframe])
+            context_bars=max(1,limit//8)
+            candles=MarketDataRepository(db).load(
+                instrument.id,
+                start=focus_start-step*context_bars,
+                end_exclusive=focus_end+step*(context_bars+1),
+                timeframe=timeframe,
+            )
+            data=[{"timestamp":bar.timestamp.isoformat(),"open":bar.open,
+                   "high":bar.high,"low":bar.low,"close":bar.close,
+                   "tick_volume":bar.tick_volume,"volume":bar.volume,
+                   "spread":bar.spread} for bar in candles]
+        elif timeframe=="M1":
             if center_timestamp:
                 before=text("""
                     SELECT timestamp,open,high,low,close,tick_volume,volume,spread
@@ -142,6 +170,12 @@ def get_market_data(symbol:str,timeframe:str="M1",limit:int=1000,center_timestam
         return {"symbol":instrument.symbol,"timeframe":timeframe,"data":data}
     finally:
         db.close()
+
+def _market_wall_time(value:datetime|None)->datetime|None:
+    if value is not None and value.utcoffset() is not None:
+        return value.replace(tzinfo=None)
+    return value
+
 @app.post("/instruments",response_model=InstrumentResponse)
 def create_instrument(instrument:InstrumentCreate):
     db=SessionLocal()

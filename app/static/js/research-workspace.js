@@ -176,20 +176,41 @@
   function renderTradeHistory(row) {
     const body=$("trade-records");body.replaceChildren();
     const result=row?.backtest_result;
-    const trades=result?TradeHistory.tradesFromBacktest(result):[];
+    const parsed=result?TradeHistory.readTrades(result):{trades:[],malformedCount:0};
+    const trades=parsed.trades;
     $("trade-empty").hidden=trades.length>0;
     $("inspect-trades").disabled=!result||trades.length===0;
     $("trade-result-context").textContent=row
-      ? `${row.definition.phase.toUpperCase()} · ${row.definition.symbol} ${row.definition.timeframe} · ${row.definition.experiment_id}`
+      ? `${row.definition.phase.toUpperCase()} · ${row.definition.symbol} ${row.definition.timeframe} · ${row.definition.experiment_id}${parsed.malformedCount?` · ${parsed.malformedCount} malformed trade row(s) omitted`:` · ${trades.length} completed trades`}`
       : "Select a completed experiment to inspect its trades.";
     body.replaceChildren(...trades.map(trade=>{
       const tr=document.createElement("tr");tr.dataset.tradeId=String(trade.id);
-      const duration=Math.max(0,trade.duration_ms),mins=Math.floor(duration/60000),days=Math.floor(mins/1440),hours=Math.floor((mins%1440)/60);
-      const durationText=days?`${days}d ${hours}h`:hours?`${hours}h ${mins%60}m`:`${mins}m`;
-      const values=[trade.id,trade.side,new Date(trade.entry_time).toLocaleString(),new Date(trade.exit_time).toLocaleString(),tradeFmt(trade.entry_price),tradeFmt(trade.exit_price),tradeFmt(trade.quantity),tradeFmt(trade.gross_pnl),tradeFmt(trade.net_pnl),tradeFmt(trade.commission),durationText];
+      const values=[trade.id,trade.side,new Date(trade.entry_time).toLocaleString(),new Date(trade.exit_time).toLocaleString(),tradeFmt(trade.entry_price),tradeFmt(trade.exit_price),tradeFmt(trade.quantity),tradeFmt(trade.gross_pnl),tradeFmt(trade.net_pnl),`${tradeFmt(trade.entry_commission)} / ${tradeFmt(trade.exit_commission)}`];
       for(const value of values){const td=document.createElement("td");td.textContent=value??"—";tr.append(td);}
       const action=document.createElement("td"),inspect=document.createElement("button");inspect.type="button";inspect.textContent="Chart";inspect.setAttribute("aria-label",`Show trade ${trade.id} on price chart`);
-      inspect.addEventListener("click",()=>openPriceChart(row,trade));action.append(inspect);tr.append(action);
+      inspect.addEventListener("click",()=>openPriceChart(row,trade,true));action.append(inspect);tr.append(action);
+      return tr;
+    }));
+  }
+  function renderExecutionLog(row) {
+    const body=$("execution-log-records");body.replaceChildren();
+    const parsed=ExecutionLog.readEvents(row?.backtest_result);
+    const events=parsed.events;
+    $("execution-log-empty").hidden=events.length>0;
+    $("execution-log-warning").hidden=parsed.malformedCount===0;
+    $("execution-log-warning").textContent=parsed.malformedCount
+      ? `${parsed.malformedCount} malformed execution event(s) omitted.`:"";
+    $("execution-log-context").textContent=row
+      ? `${row.definition.strategy_id} · ${row.definition.symbol} ${row.definition.timeframe} · ${events.length} canonical event(s)`
+      : "Select a completed experiment to inspect its execution trace.";
+    const cell=(value)=>{const td=document.createElement("td");td.textContent=value==null?"—":String(value);return td;};
+    body.replaceChildren(...events.map(event=>{
+      const tr=document.createElement("tr");tr.dataset.eventSequence=String(event.sequence);
+      tr.append(cell(event.sequence),cell(event.timestamp),cell(event.bar_index),
+        cell(event.event_type.toUpperCase()),cell(event.side?.toUpperCase()),
+        cell(event.order_id),cell(event.trade_id),cell(event.price),
+        cell(event.quantity),cell(event.trigger_price),cell(event.stop_loss),
+        cell(ExecutionLog.detailText(event)));
       return tr;
     }));
   }
@@ -206,15 +227,13 @@
       "Period volatility":fmt(analysis?.risk?.period_volatility),"Sharpe":fmt(analysis?.risk?.sharpe_ratio),
       "Sortino":fmt(analysis?.risk?.sortino_ratio),"Calmar":fmt(analysis?.risk?.calmar_ratio)};
     for(const card of $("summary").querySelectorAll(".metric")){const label=card.querySelector("small").textContent;if(label in metrics)card.querySelector("b").textContent=metrics[label];}
-    renderChart(row?.analysis_result||null);renderTradeHistory(row||null);
+    renderChart(row?.analysis_result||null);renderTradeHistory(row||null);renderExecutionLog(row||null);
   }
-  function openPriceChart(row, trade) {
+  function openPriceChart(row, trade, focusTrade = false) {
     if(!row?.backtest_result||!trade)return;
     try{
-      sessionStorage.setItem("marketResearch.selectedBacktest",JSON.stringify({
-        symbol:row.definition.symbol,timeframe:row.definition.timeframe,center_timestamp:trade.entry_time,
-        backtest_result:{orders:row.backtest_result.orders||[],trades:row.backtest_result.trades||[],equity_curve:[],open_position:row.backtest_result.open_position||null}
-      }));
+      sessionStorage.setItem("marketResearch.selectedBacktest",JSON.stringify(
+        TradeHistory.chartHandoff(row,trade,focusTrade)));
       window.location.assign("/");
     }catch(reason){error(`Unable to open the selected trade chart: ${reason.message||"session storage is unavailable"}`);}
   }
@@ -279,7 +298,7 @@
         tr.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();selectExperiment(d.experiment_id);}});
       }
       return tr;}));
-    if(state.selectedExperimentId)selectExperiment(state.selectedExperimentId);else{renderChart(null);renderTradeHistory(null);}
+    if(state.selectedExperimentId)selectExperiment(state.selectedExperimentId);else{renderChart(null);renderTradeHistory(null);renderExecutionLog(null);}
     $("advanced-tools").hidden=!state.ids.length;
   }
   form.addEventListener("submit",async event=>{event.preventDefault();if(state.advancedBusy)return;error("");const button=$("run-button");state.researchBusy=true;button.disabled=true;button.textContent="Running…";syncAdvancedButtons();$("clear-results").disabled=true;
@@ -302,13 +321,13 @@
     if(state.advancedChart){state.advancedChart.destroy();state.advancedChart=null;}
     if(state.chart){state.chart.destroy();state.chart=null;}
     $("records").replaceChildren();$("summary").hidden=true;$("advanced-tools").hidden=true;$("chart-empty").hidden=false;
-    renderChart(null);renderTradeHistory(null);
+    renderChart(null);renderTradeHistory(null);renderExecutionLog(null);
     $("result-title").textContent="No experiment loaded";$("advanced-output").hidden=true;});
   $("inspect-trades").addEventListener("click",()=>{
     const row=TradeHistory.resultForId(state.results,state.selectedExperimentId);
     if(!row?.backtest_result)return;
     const trade=TradeHistory.tradesFromBacktest(row.backtest_result)[0];if(!trade)return;
-    openPriceChart(row,trade);
+    openPriceChart(row,trade,false);
   });
   function renderAdvanced(result){
     const out=$("advanced-output"),view=ResearchPresentation.advancedView(result);

@@ -89,6 +89,7 @@
             this.overlays = {};
             this.backtest = { orders: [], trades: [], equity: [], position: null };
             this.signals = [];
+            this.focusedTradeId = null;
             this.hoverTimestamp = null;
             this.hoverPrice = null;
             this.hoverIndex = -1;
@@ -112,6 +113,7 @@
             this.bindControls();
             root.researchChart = {
                 setBacktestResult: result => this.setBacktestResult(result),
+                focusTrade: tradeId => this.focusTrade(tradeId),
                 setSignals: signals => this.setSignals(signals),
                 clearBacktest: () => this.setBacktestResult(null),
                 state: this.state,
@@ -299,6 +301,15 @@
             else this.viewport.setDomain(min, max);
         }
 
+        fitLoadedRange() {
+            const data = this.state.data;
+            if (!data.length) return;
+            const first = Data.timestamp(data[0].timestamp);
+            const last = Data.timestamp(data[data.length - 1].timestamp);
+            const padding = this.timeStep() / 2;
+            this.viewport.setDomain(first - padding, last + padding);
+        }
+
         centerTimestamp() {
             if (this.viewport.min !== null && this.viewport.max !== null) {
                 return Math.round((this.viewport.min + this.viewport.max) / 2);
@@ -406,6 +417,7 @@
 
         setBacktestResult(result) {
             this.backtest = result ? Data.transformBacktest(result) : { orders: [], trades: [], equity: [], position: null };
+            this.focusedTradeId = null;
             if (result) {
                 this.state.panels.equity = true;
                 this.root.getElementById("toggle-equity").checked = true;
@@ -419,6 +431,11 @@
             this.updateData();
             this.root.getElementById("trade-inspector").hidden = true;
             this.resizeVisibleCharts();
+        }
+
+        focusTrade(tradeId) {
+            this.focusedTradeId = tradeId;
+            this.drawOverlays();
         }
 
         setSignals(signals) {
@@ -548,9 +565,10 @@
                 ["Entry timestamp", this.formatDate(trade.entryTime)], ["Entry price", NUM_FMT.format(trade.entryPrice)],
                 ["Exit timestamp", this.formatDate(trade.exitTime)], ["Exit price", NUM_FMT.format(trade.exitPrice)],
                 ["Quantity", NUM_FMT.format(trade.quantity)], ["Gross PnL", NUM_FMT.format(trade.grossPnl)],
-                ["Commission", NUM_FMT.format(trade.commission)], ["Spread cost", NUM_FMT.format(trade.spreadCost)],
+                ["Entry commission", trade.entryCommission == null ? "—" : NUM_FMT.format(trade.entryCommission)],
+                ["Exit commission", trade.exitCommission == null ? "—" : NUM_FMT.format(trade.exitCommission)],
+                ["Spread cost", NUM_FMT.format(trade.spreadCost)],
                 ["Slippage", NUM_FMT.format(trade.slippage)], ["Net PnL", NUM_FMT.format(trade.netPnl)],
-                ["Return", this.formatPercent(trade.returnPct)], ["Duration", this.formatDuration(trade.durationMs)],
             ];
             this.root.getElementById("trade-title").textContent = `Trade ${trade.id}`;
             this.renderInspector(details, trade.winning ? "positive" : "negative");
@@ -691,8 +709,17 @@
                 const y1 = scales.y.getPixelForValue(trade.entryPrice), y2 = scales.y.getPixelForValue(trade.exitPrice);
                 if (x2 < area.left || x1 > area.right) continue;
                 ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(x2, y2);
-                ctx.strokeStyle = trade.winning ? "rgba(53, 201, 139, .72)" : "rgba(240, 100, 103, .72)";
-                ctx.lineWidth = 1.35; ctx.stroke();
+                const focused = trade.id === this.focusedTradeId;
+                const sideColor = trade.side === "long" ? COLORS.green : COLORS.red;
+                ctx.strokeStyle = focused ? sideColor
+                    : trade.winning ? "rgba(53, 201, 139, .72)" : "rgba(240, 100, 103, .72)";
+                ctx.lineWidth = focused ? 2.5 : 1.35; ctx.stroke();
+                if (focused) {
+                    ctx.beginPath(); ctx.arc(x1, y1, 4.5, 0, Math.PI * 2);
+                    ctx.fillStyle = sideColor; ctx.fill();
+                    ctx.beginPath(); ctx.arc(x2, y2, 4.5, 0, Math.PI * 2);
+                    ctx.strokeStyle = sideColor; ctx.lineWidth = 2; ctx.stroke();
+                }
             }
             const allOrders = this.backtest.orders;
             let orderIndex = lowerBound(allOrders, start, order => order.timestamp);

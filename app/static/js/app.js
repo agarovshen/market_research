@@ -51,6 +51,8 @@
     async function fetchMarketData({ keepContext = true, centerTimestamp = null } = {}) {
         const symbol = instrument.value;
         const period = state.timeframe;
+        const focusRange = pendingBacktest?.focus_range || null;
+        const focusedTradeId = pendingBacktest?.trade_id ?? null;
         const sequence = ++loadSequence;
         activeRequest?.abort();
         activeRequest = new AbortController();
@@ -61,7 +63,8 @@
         chart.setTimeframeButtons(period);
         $("#workspace-symbol").textContent = symbol;
         $("#ohlc-symbol").textContent = symbol;
-        const params = ResearchData.marketDataParams(symbol, period, 5000, anchor);
+        const params = ResearchData.marketDataParams(symbol, period,
+            focusRange ? state.visibleCount : 5000, anchor, focusRange);
         try {
             const response = await fetch(`/market-data?${params.toString()}`, { signal: activeRequest.signal });
             const result = await response.json();
@@ -73,6 +76,7 @@
             updateSummary(state.data);
             if (pendingBacktest) {
                 chart.setBacktestResult(pendingBacktest.backtest_result);
+                chart.focusTrade(focusedTradeId);
                 pendingBacktest = null;
             }
             if (!state.data.length) {
@@ -81,6 +85,7 @@
                 return;
             }
             chart.setData(state.data, { resetDomain: true, anchor });
+            if (focusRange) chart.fitLoadedRange();
             setStatus(`${state.data.length.toLocaleString()} bars loaded`, "success");
             window.setTimeout(() => { if (sequence === loadSequence) setStatus(""); }, 2500);
         } catch (error) {
