@@ -356,6 +356,7 @@ class ResearchAPIIntegrationTests(unittest.TestCase):
             self.assertGreater(len(result["backtest_result"]["equity_curve"]), 0)
             self.assertEqual(result["definition"]["analysis_config"]["periods_per_year"], 252)
             self.assertEqual(result["definition"]["analysis_config"]["risk_free_rate"], .02)
+            self.assertEqual(result["definition"]["backtest_config"]["spread_scale"], 0.00001)
             identity = batch["results"][0]["definition"]["experiment_id"]
             stored = ResearchResultRepository(session).get(identity)
             self.assertIsNotNone(stored)

@@ -23,6 +23,18 @@
         return { events, malformedCount };
     }
 
+    function displayEvents(backtestResult) {
+        const parsed = readEvents(backtestResult);
+        const activeBars = new Set(parsed.events
+            .filter(event => event.event_type.toLowerCase() !== "bar")
+            .map(event => event.bar_index));
+        return {
+            ...parsed,
+            events: parsed.events.filter(event => event.event_type.toLowerCase() !== "bar" ||
+                activeBars.has(event.bar_index)),
+        };
+    }
+
     function detailText(event) {
         const parts = [];
         if (event.action != null) parts.push(`action=${event.action}`);
@@ -38,5 +50,5 @@
         return parts.join(" · ") || "—";
     }
 
-    return { readEvents, detailText };
+    return { readEvents, displayEvents, detailText };
 });

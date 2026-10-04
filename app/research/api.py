@@ -85,7 +85,7 @@ class ResearchRunRequest(BaseModel):
     position_size: float = Field(default=1, gt=0)
     commission_per_unit: float = Field(default=0, ge=0)
     commission_rate: float = Field(default=0, ge=0)
-    spread_scale: float = Field(default=1, ge=0)
+    spread_scale: float = Field(default=0.00001, ge=0)
     slippage: float = Field(default=0, ge=0)
     periods_per_year: float | None = Field(default=None, gt=0)
     risk_free_rate: float = Field(default=0, gt=-1)

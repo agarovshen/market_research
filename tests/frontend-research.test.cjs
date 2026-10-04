@@ -5,6 +5,7 @@ const Research = require("../app/static/js/research-data.js");
 const Parameters = require("../app/static/js/research-parameters.js");
 const TradeHistory = require("../app/static/js/trade-history.js");
 const ExecutionLog = require("../app/static/js/execution-log.js");
+const ResultSections = require("../app/static/js/research-result-sections.js");
 
 const rows = [
     { timestamp: "2024-01-01T00:00:00Z", open: 10, high: 11, low: 9, close: 10, tick_volume: 4, volume: 40, spread: 0.2 },
@@ -238,6 +239,71 @@ test("canonical execution event reader retains event order and malformed isolati
     const badEvent = ExecutionLog.readEvents({ execution_trace: [raw[0], null, raw[1]] });
     assert.deepEqual(badEvent.events.map(event => event.sequence), [1, 2]);
     assert.equal(badEvent.malformedCount, 1);
+});
+
+test("execution log display hides idle BAR rows but retains BAR context for lifecycle events", () => {
+    const raw = [
+        { sequence: 1, timestamp: rows[0].timestamp, event_type: "bar", bar_index: 0 },
+        { sequence: 2, timestamp: rows[0].timestamp, event_type: "signal", bar_index: 0 },
+        { sequence: 3, timestamp: rows[1].timestamp, event_type: "bar", bar_index: 1 },
+        { sequence: 4, timestamp: rows[2].timestamp, event_type: "execution", bar_index: 2 },
+    ];
+    assert.deepEqual(ExecutionLog.readEvents({ execution_trace: raw }).events.map(event => event.sequence), [1, 2, 3, 4]);
+    assert.deepEqual(ExecutionLog.displayEvents({ execution_trace: raw }).events.map(event => event.sequence), [1, 2, 4]);
+});
+
+test("Copy all log copies every rendered column and row and safely handles an empty log", async () => {
+    class Element {
+        constructor(tag = "div") { this.tagName = tag; this.children = []; this.dataset = {}; this.hidden = false; this.disabled = false; this.textContent = ""; }
+        replaceChildren(...children) { this.children = children; }
+        append(...children) { this.children.push(...children); }
+        addEventListener(name, callback) { this.listeners ||= {}; this.listeners[name] = callback; }
+        get rows() { return this.children; }
+        get cells() { return this.children; }
+    }
+    const elements = Object.fromEntries([
+        "execution-log-records", "execution-log-empty", "execution-log-warning",
+        "execution-log-context", "copy-execution-log", "copy-execution-log-status",
+    ].map(id => [id, new Element()]));
+    const oldDocument = Object.getOwnPropertyDescriptor(globalThis, "document");
+    const oldNavigator = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+    const copied = [];
+    Object.defineProperty(globalThis, "document", { configurable: true, value: {
+        getElementById: id => elements[id] || null,
+        createElement: tag => new Element(tag),
+    } });
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: {
+        clipboard: { writeText: async value => copied.push(value) },
+    } });
+    try {
+        const row = { definition: { strategy_id: "fixture", symbol: "GBPUSD", timeframe: "H4" },
+            backtest_result: { execution_trace: [
+                { sequence: 1, timestamp: rows[0].timestamp, event_type: "signal", bar_index: 2,
+                    side: "long", details: [["strategy_reason", "breakout"]] },
+                { sequence: 2, timestamp: rows[1].timestamp, event_type: "execution", bar_index: 3,
+                    side: "long", order_id: 8, trade_id: 4, price: 1.34, quantity: 2,
+                    trigger_price: 1.33, stop_loss: 1.32, details: [["spread_cost", 0.00003]] },
+            ] } };
+        ResultSections.renderExecutionLog(row);
+        assert.equal(elements["copy-execution-log"].disabled, false);
+        await elements["copy-execution-log"].onclick();
+        assert.equal(elements["copy-execution-log-status"].textContent, "Copied");
+        const copiedLines = copied[0].split("\n");
+        assert.deepEqual(copiedLines[0].split("\t"), ["#", "Time", "Bar", "Event", "Side", "Order",
+            "Trade", "Price", "Quantity", "Trigger", "Stop loss", "Details"]);
+        assert.equal(copiedLines.length, 3);
+        assert.match(copiedLines[1], /strategy_reason=breakout/);
+        assert.match(copiedLines[2], /spread_cost=0\.00003/);
+        ResultSections.renderExecutionLog(null);
+        assert.equal(elements["copy-execution-log"].disabled, true);
+        await elements["copy-execution-log"].onclick();
+        assert.equal(copied.length, 1);
+    } finally {
+        if (oldDocument) Object.defineProperty(globalThis, "document", oldDocument);
+        else delete globalThis.document;
+        if (oldNavigator) Object.defineProperty(globalThis, "navigator", oldNavigator);
+        else delete globalThis.navigator;
+    }
 });
 
 test("selected research result is phase-specific and switching to an empty result clears trades", () => {

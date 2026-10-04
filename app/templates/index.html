@@ -59,7 +59,7 @@
                     <label>Quantity<input name="position_size" type="number" min="0.000001" step="any" value="1" required></label>
                     <label>Commission / unit<input name="commission_per_unit" type="number" min="0" step="any" value="0" required></label>
                     <label>Commission rate<input name="commission_rate" type="number" min="0" step="any" value="0" required></label>
-                    <label>Spread scale<input name="spread_scale" type="number" min="0" step="any" value="1" required></label>
+                    <label>Spread scale · price units per feed point<input name="spread_scale" type="number" min="0" step="any" value="0.00001" required></label>
                     <label>Slippage<input name="slippage" type="number" min="0" step="any" value="0" required></label>
                     <label>Periods per year<input name="periods_per_year" type="number" min="0.000001" step="any" placeholder="Optional"></label>
                     <label>Annual risk-free rate<input name="risk_free_rate" type="number" min="-0.999999" step="any" value="0" required></label>
@@ -151,7 +151,7 @@
         </section>
 
         <section class="execution-log" aria-labelledby="execution-log-title">
-            <div class="test-heading"><div><h2 id="execution-log-title">Order &amp; Strategy Log</h2><p id="execution-log-context">No test result selected.</p></div></div>
+            <div class="test-heading"><div><h2 id="execution-log-title">Order &amp; Strategy Log</h2><p id="execution-log-context">No test result selected.</p></div><div><button id="copy-execution-log" type="button" disabled>Copy all log</button><span id="copy-execution-log-status" role="status" aria-live="polite"></span></div></div>
             <p id="execution-log-empty">No execution events.</p>
             <p id="execution-log-warning" role="status" hidden></p>
             <div class="test-table"><table><thead><tr><th>#</th><th>Time</th><th>Bar</th><th>Event</th><th>Side</th><th>Order</th><th>Trade</th><th>Price</th><th>Quantity</th><th>Trigger</th><th>Stop loss</th><th>Details</th></tr></thead><tbody id="execution-log-records"></tbody></table></div>

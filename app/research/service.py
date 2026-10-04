@@ -73,7 +73,7 @@ class ResearchApplicationService:
             position_size=request.get("position_size", 1),
             commission_per_unit=request.get("commission_per_unit", 0),
             commission_rate=request.get("commission_rate", 0),
-            spread_scale=request.get("spread_scale", 1),
+            spread_scale=request.get("spread_scale", 0.00001),
             slippage=request.get("slippage", 0),
             final_liquidation=request.get("final_liquidation", True),
         )

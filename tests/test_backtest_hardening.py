@@ -266,6 +266,56 @@ class BacktestHardeningTests(unittest.TestCase):
         self.assertEqual(result.trades[0].net_pnl, -3)
         self.assertEqual(result.final_cash, 997)
 
+    def test_mt5_feed_points_are_scaled_into_short_execution_prices_and_trade_pnl(self):
+        bars = (
+            Bar(START, 1.3426, 1.3429, 1.3424, 1.3428, spread=3),
+            Bar(START + timedelta(minutes=1), 1.3428, 1.3430, 1.3426, 1.3429, spread=3),
+            Bar(START + timedelta(minutes=2), 1.3443, 1.3445, 1.3440, 1.3442, spread=3),
+        )
+        result, _ = self.run_script(
+            {0: Signal(OrderAction.OPEN, Side.SHORT), 1: Signal(OrderAction.CLOSE)},
+            bars=bars, initial_cash=10_000,
+            costs=ExecutionCosts(spread_scale=0.00001),
+        )
+        entry, exit_ = result.orders
+        trade = result.trades[0]
+        self.assertEqual((entry.reference_price, exit_.reference_price), (1.3428, 1.3443))
+        self.assertAlmostEqual(entry.fill_price, 1.342785)
+        self.assertAlmostEqual(exit_.fill_price, 1.344315)
+        self.assertGreater(entry.fill_price, 1.34)
+        self.assertLess(entry.fill_price, 1.35)
+        self.assertGreater(exit_.fill_price, 1.34)
+        self.assertLess(exit_.fill_price, 1.35)
+        self.assertEqual((trade.entry_price, trade.exit_price),
+                         (entry.fill_price, exit_.fill_price))
+        self.assertAlmostEqual(trade.gross_pnl, -0.00153)
+        self.assertAlmostEqual(trade.net_pnl, trade.gross_pnl)
+        self.assertAlmostEqual(result.total_spread_cost, 0.00003)
+        execution_prices = [event.price for event in result.execution_trace
+                            if event.event_type.value == "execution"]
+        self.assertEqual(execution_prices, [entry.fill_price, exit_.fill_price])
+
+    def test_buy_spread_scale_changes_price_units_and_zero_spread_is_unchanged(self):
+        bars = (
+            Bar(START, 1.3426, 1.3429, 1.3424, 1.3428, spread=3),
+            Bar(START + timedelta(minutes=1), 1.3428, 1.3430, 1.3426, 1.3429, spread=3),
+            Bar(START + timedelta(minutes=2), 1.3443, 1.3445, 1.3440, 1.3442, spread=3),
+        )
+        signals = {0: Signal(OrderAction.OPEN, Side.LONG), 1: Signal(OrderAction.CLOSE)}
+        scaled, _ = self.run_script(signals, bars=bars, initial_cash=10_000,
+                                    costs=ExecutionCosts(spread_scale=0.00001))
+        double_scaled, _ = self.run_script(signals, bars=bars, initial_cash=10_000,
+                                            costs=ExecutionCosts(spread_scale=0.00002))
+        no_spread, _ = self.run_script(signals, bars=tuple(
+            Bar(bar.timestamp, bar.open, bar.high, bar.low, bar.close, spread=0) for bar in bars
+        ), initial_cash=10_000, costs=ExecutionCosts(spread_scale=0.00001))
+        self.assertAlmostEqual(scaled.orders[0].fill_price, 1.342815)
+        self.assertAlmostEqual(scaled.orders[1].fill_price, 1.344285)
+        self.assertAlmostEqual(double_scaled.orders[0].fill_price - bars[1].open, 0.00003)
+        self.assertAlmostEqual(no_spread.orders[0].fill_price, bars[1].open)
+        self.assertAlmostEqual(no_spread.orders[1].fill_price, bars[2].open)
+        self.assertEqual(no_spread.total_spread_cost, 0)
+
     def test_slippage_only_adjusts_both_fills_once(self):
         result, _ = self.run_script({0: Signal(OrderAction.OPEN, Side.LONG),
                                      2: Signal(OrderAction.CLOSE)}, initial_cash=1000,
@@ -538,6 +588,24 @@ class RepositoryAndRunnerTests(unittest.TestCase):
         self.assertEqual(result.total_commission, 0.25)
         self.assertEqual(result.total_spread_cost, 0)
         self.assertEqual(result.total_slippage_cost, 0.1)
+
+    def test_repository_run_config_defaults_integer_feed_spread_to_price_units(self):
+        self.assertEqual(BacktestRunConfig(symbol="EURUSD").spread_scale, 0.00001)
+
+    def test_runner_applies_feed_point_scale_to_canonical_short_trade(self):
+        strategy = ScriptedStrategy({0: Signal(OrderAction.OPEN, Side.SHORT),
+                                     1: Signal(OrderAction.CLOSE)})
+        result = BacktestRunner(self.repository).run(
+            strategy=strategy, config=BacktestRunConfig(symbol="EURUSD"))
+        entry, exit_ = result.orders
+        trade = result.trades[0]
+        self.assertEqual((entry.reference_price, exit_.reference_price), (101, 104))
+        self.assertAlmostEqual(entry.fill_price, 100.999985)
+        self.assertAlmostEqual(exit_.fill_price, 104.00002)
+        self.assertEqual((trade.entry_price, trade.exit_price),
+                         (entry.fill_price, exit_.fill_price))
+        self.assertAlmostEqual(trade.gross_pnl, -3.000035)
+        self.assertAlmostEqual(result.total_spread_cost, 0.000035)
 
     def test_runner_strategy_completes_full_signal_to_result_lifecycle(self):
         class ThresholdStrategy:

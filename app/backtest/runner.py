@@ -18,7 +18,10 @@ class BacktestRunConfig:
     position_size: float = 1.0
     commission_per_unit: float = 0.0
     commission_rate: float = 0.0
-    spread_scale: float = 1.0
+    # MarketData spread is imported as integer feed points (MT5 CSV). Convert
+    # those points to quote-price units by default; callers can override for
+    # instruments/feed conventions with a different point size.
+    spread_scale: float = 0.00001
     slippage: float = 0.0
     final_liquidation: bool = True
 

@@ -58,7 +58,7 @@
         const body = $("execution-log-records");
         if (!body) return;
         body.replaceChildren();
-        const parsed = ExecutionLog.readEvents(row?.backtest_result);
+        const parsed = ExecutionLog.displayEvents(row?.backtest_result);
         const events = parsed.events;
         $("execution-log-empty").hidden = events.length > 0;
         const warning = $("execution-log-warning");
@@ -76,6 +76,30 @@
             td.textContent = value == null ? "—" : String(value);
             return td;
         };
+        const copyButton = $("copy-execution-log");
+        const copyStatus = $("copy-execution-log-status");
+        if (copyButton) {
+            copyButton.disabled = events.length === 0;
+            copyButton.onclick = async () => {
+                if (!body.rows.length) return;
+                const headers = ["#", "Time", "Bar", "Event", "Side", "Order", "Trade",
+                    "Price", "Quantity", "Trigger", "Stop loss", "Details"];
+                const lines = [headers.join("\t"), ...Array.from(body.rows, tr =>
+                    Array.from(tr.cells, td => td.textContent).join("\t"))];
+                try {
+                    const clipboard = globalThis.navigator?.clipboard;
+                    if (typeof clipboard?.writeText !== "function") {
+                        if (copyStatus) copyStatus.textContent = "Clipboard unavailable";
+                        return;
+                    }
+                    await clipboard.writeText(lines.join("\n"));
+                    if (copyStatus) copyStatus.textContent = "Copied";
+                } catch {
+                    if (copyStatus) copyStatus.textContent = "Copy failed";
+                }
+            };
+        }
+        if (copyStatus) copyStatus.textContent = "";
         body.replaceChildren(...events.map(event => {
             const tr = document.createElement("tr");
             tr.dataset.eventSequence = String(event.sequence);
