@@ -14,8 +14,9 @@ It does not create another result type or calculate analysis metrics.
   `total_slippage_cost`.
 - `open_position`: a `Position` or `None`.
 - `orders`: ordered tuple of `Order` records. Each has a sequence, signal and
-  fill timestamps (`created_at`, `filled_at`), action, side, quantity,
-  reference/fill prices, commission, spread cost, and slippage cost.
+  fill timestamps (`created_at`, optional `filled_at`), action, side, type,
+  status, quantity, reference/fill prices, commission, spread cost, and
+  slippage cost. Pending STOP orders have no fill timestamp or fill price.
 - `trades`: ordered tuple of completed `Trade` records, including side,
   quantity, entry/exit timestamps and prices, entry/exit commission, gross PnL,
   and net PnL.
@@ -26,11 +27,28 @@ It does not create another result type or calculate analysis metrics.
   `format_trade_lifecycle(sequence)` filters one completed trade and then
   prints its canonical `Trade` fields.
 
-Signals use completed-bar context and are eligible for execution at the next
-bar's open. Configured final liquidation closes any remaining position at the
-last available bar close. Spread and slippage are reflected in fill prices and
-reported cost totals; commission is charged by the engine. These fields are
-the accounting source of truth for consumers, including the research chart.
+MARKET signals use completed-bar context and are eligible for execution at the
+next bar's open. A STOP opening signal creates one pending STOP order; it
+becomes eligible on the bar after its signal. BUY STOP triggers at
+`high >= trigger`, SELL STOP at `low <= trigger`. A normal touch uses the
+trigger price as its fill reference; a gap through the level uses the bar open.
+The existing spread, slippage, and commission settings are applied by the
+normal fill-cost path.
+
+An open position may carry an initial stop loss and receive an explicit
+`Signal(OrderAction.MODIFY_STOP, stop_loss=...)`. Long stops trigger at
+`low <= stop_loss`, short stops at `high >= stop_loss`; a gap through the stop
+uses the bar open, otherwise the stop price is the fill reference. A newly
+opened position's stop is not checked on its entry bar. A position open at the
+start of a bar is checked on that bar. Stop updates take effect after the
+completed signal bar. Stop changes are accepted as supplied; the engine does
+not impose a tightening-only rule.
+
+Only one pending STOP entry is supported; a second pending STOP or market
+entry is rejected. There is no STOP expiry/cancellation, TP, OCO, or partial
+fill support. Configured final liquidation closes any remaining position at
+the last available bar close. Spread and slippage are reflected in fill prices
+and reported cost totals; commission is charged by the engine.
 
 ## Inspect the execution trace
 
@@ -51,15 +69,18 @@ timestamps, quantity, and PnL come from values already produced by the
 canonical engine path. The trace does not recalculate PnL. For close-at-end,
 the close order and execution are marked `end_of_data_liquidation`.
 
-`Signal` currently carries only action, optional side, and optional quantity;
-it has no strategy reason field. The trace reports that strategy reasoning is
-not exposed instead of inferring it. The engine currently has no stop/target
-management, pending stop/limit order triggers, cancellation/rejection states,
-or persistent position IDs. Accordingly, there are no SL/TP update or
-`ORDER_TRIGGERED`/`ORDER_CANCELLED` events. Market order intent is associated
-with the signal bar and its actual fill on the next bar; there is no separate
-active-order state. Trade sequence and order sequence provide lifecycle
-correlation.
+`Signal` has no strategy reason field. The trace reports that strategy
+reasoning is not exposed instead of inferring it. STOP order type, pending
+state, trigger, execution, initial stop, stop updates, and stop closes are
+visible in the trace. There are no TP, cancellation/expiry, rejection, or
+persistent position ID events. Trade sequence and order sequence provide
+lifecycle correlation.
+
+OHLC bars do not reveal the true intrabar path. These deterministic rules make
+the tested execution repeatable; they do not reconstruct tick-level execution
+or broker behavior. If an entry and its stop are both inside one candle's
+range, the stop is deferred until the next bar by policy, not by an inferred
+price path.
 
 For trace diagnostics, `first_event_difference(expected, actual)` reports the
 first event number and differing field. This compares event streams only; the

@@ -14,8 +14,8 @@ does not establish correctness for every input or strategy.
   next-bar fills, final liquidation, equity, and drawdown.
 - Independent calculations in `reference_model.py`, using primitive rows and
   scripted intent tuples only. It does not import application code and models
-  only next-bar-open market intents, configured spread/slippage/commission,
-  close marking, and final liquidation. One explicit synthetic
+  next-bar-open market intents plus a one-entry STOP/one-stop-exit path with
+  explicit trigger, gap, cost, mark, and drawdown arithmetic. One explicit synthetic
   historical-style OHLC path is compared end to end with production orders,
   trades, costs, equity, drawdown, and final equity. Its prices are authored
   test data, not exchange/vendor history; no real historical dataset is
@@ -48,11 +48,34 @@ Data behavior tested against current code:
 | Mixed naive/aware timestamps | Rejected during ordering comparison (`TypeError`) |
 | Insufficient SMA warm-up | Strategy emits no signal before its required history |
 
-The engine supports market signals that fill on the next bar open. Stop/target,
-limit, cancellation, rejection, gap-trigger and intrabar ordering semantics do
-not exist in this contract. The exact-threshold fixture validates a strategy
-rule's equality boundary, not a broker trigger order. Strategy-specific
-warm-up rules remain the strategy's responsibility.
+The engine supports next-bar-open MARKET orders, one pending BUY STOP or SELL
+STOP entry, and position stop loss with explicit modification. It does not
+support STOP expiry/cancellation, limit orders, TP, OCO, partial fills, or
+multiple simultaneous pending entries. Strategy-specific warm-up rules remain
+the strategy's responsibility.
+
+## STOP and stop-loss assumptions
+
+- BUY STOP triggers when `bar.high >= trigger`; SELL STOP when
+  `bar.low <= trigger`. Equality triggers.
+- A non-gap touch uses the trigger as fill reference. A gap through a BUY STOP
+  (`open >= trigger`) or SELL STOP (`open <= trigger`) uses the bar open.
+- STOP created after bar N's strategy callback is eligible starting bar N+1.
+- LONG stop loss triggers when `bar.low <= stop_loss`; SHORT when
+  `bar.high >= stop_loss`. Equality triggers. A gap through a stop uses the
+  bar open; otherwise the stop price is the reference.
+- A stop on a position open at bar start is checked during that bar. A
+  position opened during a bar is not checked against its stop until the next
+  bar. This resolves same-bar entry/stop ambiguity by explicit policy.
+- One pending STOP entry is allowed. A second pending STOP or a market entry
+  while it is pending raises `ValueError`. Stop modification uses exactly the
+  new supplied price; the engine imposes no monotonic/tightening rule.
+
+OHLC bars do not reveal the true intrabar path. The backtest therefore uses
+deterministic bar-based execution assumptions. These assumptions are tested,
+but they are not equivalent to reconstructing tick-level execution or broker
+behavior. In particular, not applying a new position's stop on its entry bar
+does not claim to know which level was touched first.
 
 ## Independence and adding fixtures
 

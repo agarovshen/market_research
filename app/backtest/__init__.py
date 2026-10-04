@@ -3,7 +3,7 @@
 from app.backtest.engine import BacktestEngine, BacktestSettings
 from app.backtest.models import (
     Bar, BacktestResult, ExecutionCosts, ExecutionEvent, ExecutionEventType,
-    Order, OrderAction, Position, Side, Signal, Trade,
+    Order, OrderAction, OrderStatus, OrderType, Position, Side, Signal, Trade,
 )
 from app.backtest.runner import BacktestRunConfig, BacktestRunner
 from app.backtest.strategy import Strategy, StrategyContext
@@ -13,7 +13,7 @@ __all__ = [
     "BacktestEngine", "BacktestResult", "BacktestRunConfig", "BacktestRunner",
     "BacktestSettings", "Bar",
     "ExecutionCosts", "ExecutionEvent", "ExecutionEventType", "EventDifference",
-    "MarketDataRepository", "Order", "OrderAction", "Position", "Side",
+    "MarketDataRepository", "Order", "OrderAction", "OrderStatus", "OrderType", "Position", "Side",
     "Signal", "Strategy", "StrategyContext", "Trade", "first_event_difference",
 ]
 

@@ -1,10 +1,10 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from math import isfinite
 from typing import Iterable
 
 from app.backtest.models import (
     BacktestResult, Bar, EquityPoint, ExecutionCosts, ExecutionEvent,
-    ExecutionEventType, Order, OrderAction,
+    ExecutionEventType, Order, OrderAction, OrderStatus, OrderType,
     Position, Side, Signal, Trade,
 )
 from app.backtest.strategy import BarHistory, Strategy, StrategyContext
@@ -42,6 +42,7 @@ class BacktestEngine:
         realized = 0.0
         events: list[ExecutionEvent] = []
         pending: tuple[Signal, Bar, int | None] | None = None
+        pending_stop: tuple[Signal, Bar, int, int] | None = None
 
         def record(event_type: ExecutionEventType, timestamp, bar_index: int | None,
                    **fields) -> None:
@@ -49,7 +50,9 @@ class BacktestEngine:
                                          bar_index, **fields))
 
         def fill(action: OrderAction, side: Side, qty: float, signal_time, bar: Bar,
-                 reference: float) -> Order:
+                 reference: float, *, order_type: OrderType = OrderType.MARKET,
+                 trigger_price: float | None = None, stop_loss: float | None = None,
+                 replace_sequence: int | None = None) -> Order:
             nonlocal cash, commissions, spread_costs, slippage_costs
             half_spread = bar.spread * self.settings.costs.spread_scale / 2
             direction = 1 if side is Side.LONG else -1
@@ -64,12 +67,83 @@ class BacktestEngine:
             commissions += commission
             spread_costs += spread
             slippage_costs += slip
-            order = Order(len(orders) + 1, signal_time, bar.timestamp, action, side,
-                          qty, reference, price, commission, spread, slip)
-            orders.append(order)
+            sequence = replace_sequence if replace_sequence is not None else len(orders) + 1
+            order = Order(sequence, signal_time, bar.timestamp, action, side,
+                          qty, reference, price, commission, spread, slip,
+                          order_type, OrderStatus.FILLED, trigger_price, stop_loss)
+            if replace_sequence is None:
+                orders.append(order)
+            else:
+                orders[replace_sequence - 1] = order
             return order
 
+        def record_closed_trade(prior: Position, order: Order, index: int,
+                                reason: str, trade_id: int) -> Trade:
+            nonlocal realized
+            direction = 1 if prior.side is Side.LONG else -1
+            gross = (order.fill_price - prior.entry_price) * prior.quantity * direction
+            net = gross - prior.entry_commission - order.commission
+            realized += net
+            trade = Trade(trade_id, prior.side, prior.quantity, prior.entry_time,
+                          order.filled_at, prior.entry_price, order.fill_price,
+                          prior.entry_commission, order.commission, gross, net)
+            record(ExecutionEventType.POSITION_CLOSED, order.filled_at, index,
+                   action=OrderAction.CLOSE, side=prior.side, order_id=order.sequence,
+                   order_type=order.order_type, trade_id=trade.sequence,
+                   price=order.fill_price, quantity=prior.quantity,
+                   stop_loss=order.stop_loss, reason=reason)
+            record(ExecutionEventType.PNL_CALCULATED, order.filled_at, index,
+                   side=trade.side, order_id=order.sequence,
+                   trade_id=trade.sequence, price=trade.exit_price,
+                   quantity=trade.quantity,
+                   details=(("gross_pnl", trade.gross_pnl),
+                            ("entry_commission", trade.entry_commission),
+                            ("exit_commission", trade.exit_commission),
+                            ("net_pnl", trade.net_pnl)))
+            trades.append(trade)
+            record(ExecutionEventType.TRADE_CREATED, order.filled_at, index,
+                   side=trade.side, order_id=order.sequence,
+                   trade_id=trade.sequence, price=trade.exit_price,
+                   quantity=trade.quantity,
+                   details=(("entry_time", trade.entry_time.isoformat()),
+                            ("entry_price", trade.entry_price),
+                            ("exit_time", trade.exit_time.isoformat()),
+                            ("exit_price", trade.exit_price),
+                            ("gross_pnl", trade.gross_pnl),
+                            ("net_pnl", trade.net_pnl)))
+            return trade
+
+        def finish_stop_position(prior: Position, bar: Bar, index: int,
+                                 reference: float, trigger: float, reason: str) -> None:
+            nonlocal position
+            trade_id = len(trades) + 1
+            order_id = len(orders) + 1
+            record(ExecutionEventType.ORDER_CREATED, bar.timestamp, index,
+                   action=OrderAction.CLOSE, side=prior.side, order_id=order_id,
+                   order_type=OrderType.STOP, trade_id=trade_id,
+                   quantity=prior.quantity, trigger_price=trigger,
+                   stop_loss=trigger, reason=reason)
+            order = fill(OrderAction.CLOSE, prior.side, prior.quantity,
+                         bar.timestamp, bar, reference, order_type=OrderType.STOP,
+                         trigger_price=trigger, stop_loss=trigger)
+            record(ExecutionEventType.ORDER_TRIGGERED, bar.timestamp, index,
+                   action=OrderAction.CLOSE, side=prior.side, order_id=order.sequence,
+                   order_type=OrderType.STOP, trade_id=trade_id, quantity=prior.quantity,
+                   trigger_price=trigger, price=reference, reason=reason)
+            record(ExecutionEventType.EXECUTION, bar.timestamp, index,
+                   action=order.action, side=order.side, order_id=order.sequence,
+                   order_type=OrderType.STOP, trade_id=trade_id,
+                   price=order.fill_price, trigger_price=trigger, quantity=order.quantity,
+                   reason=reason,
+                   details=(("reference_price", order.reference_price),
+                            ("commission", order.commission),
+                            ("spread_cost", order.spread_cost),
+                            ("slippage_cost", order.slippage_cost)))
+            record_closed_trade(prior, order, index, reason, trade_id)
+            position = None
+
         for i, bar in enumerate(data):
+            position_at_bar_start = position
             record(ExecutionEventType.BAR, bar.timestamp, i,
                    details=(("open", bar.open), ("high", bar.high),
                             ("low", bar.low), ("close", bar.close),
@@ -82,86 +156,175 @@ class BacktestEngine:
                         qty = signal.quantity if signal.quantity is not None else self.settings.position_size
                         if side is None or not isfinite(qty) or qty <= 0:
                             raise ValueError("Open signals require a side and positive finite quantity")
-                        order = fill(OrderAction.OPEN, side, qty, created_bar.timestamp, bar, bar.open)
+                        order = fill(OrderAction.OPEN, side, qty, created_bar.timestamp, bar, bar.open,
+                                     stop_loss=signal.stop_loss)
                         record(ExecutionEventType.EXECUTION, bar.timestamp, i,
                                action=order.action, side=order.side, order_id=order.sequence,
+                               order_type=order.order_type,
                                trade_id=trade_id, price=order.fill_price, quantity=order.quantity,
                                reason="next_bar_open_market_fill",
                                details=(("reference_price", order.reference_price),
                                         ("commission", order.commission),
                                         ("spread_cost", order.spread_cost),
                                         ("slippage_cost", order.slippage_cost)))
-                        position = Position(side, qty, bar.timestamp, order.fill_price, order.commission)
+                        position = Position(side, qty, bar.timestamp, order.fill_price, order.commission,
+                                            signal.stop_loss)
                         record(ExecutionEventType.POSITION_OPENED, bar.timestamp, i,
                                action=OrderAction.OPEN, side=position.side,
-                               order_id=order.sequence, trade_id=trade_id,
-                               price=position.entry_price, quantity=position.quantity)
+                               order_id=order.sequence, order_type=order.order_type, trade_id=trade_id,
+                               price=position.entry_price, quantity=position.quantity,
+                               stop_loss=position.stop_loss)
                 elif position is not None:
                     prior = position
                     order = fill(OrderAction.CLOSE, prior.side, prior.quantity, created_bar.timestamp, bar, bar.open)
                     record(ExecutionEventType.EXECUTION, bar.timestamp, i,
                            action=order.action, side=order.side, order_id=order.sequence,
+                           order_type=order.order_type,
                            trade_id=trade_id, price=order.fill_price, quantity=order.quantity,
                            reason="strategy_close_signal",
                            details=(("reference_price", order.reference_price),
                                     ("commission", order.commission),
                                     ("spread_cost", order.spread_cost),
                                     ("slippage_cost", order.slippage_cost)))
-                    gross = (order.fill_price - prior.entry_price) * prior.quantity * (1 if prior.side is Side.LONG else -1)
-                    net = gross - prior.entry_commission - order.commission
-                    realized += net
-                    trade = Trade(len(trades) + 1, prior.side, prior.quantity,
-                        prior.entry_time, bar.timestamp, prior.entry_price, order.fill_price,
-                        prior.entry_commission, order.commission, gross, net)
-                    record(ExecutionEventType.POSITION_CLOSED, bar.timestamp, i,
-                           action=OrderAction.CLOSE, side=prior.side,
-                           order_id=order.sequence, trade_id=trade.sequence,
-                           price=order.fill_price, quantity=prior.quantity,
-                           reason="strategy_close_signal")
-                    record(ExecutionEventType.PNL_CALCULATED, bar.timestamp, i,
-                           side=trade.side, order_id=order.sequence,
-                           trade_id=trade.sequence, price=trade.exit_price,
-                           quantity=trade.quantity,
-                           details=(("gross_pnl", trade.gross_pnl),
-                                    ("entry_commission", trade.entry_commission),
-                                    ("exit_commission", trade.exit_commission),
-                                    ("net_pnl", trade.net_pnl)))
-                    trades.append(trade)
-                    record(ExecutionEventType.TRADE_CREATED, bar.timestamp, i,
-                           side=trade.side, order_id=order.sequence,
-                           trade_id=trade.sequence, price=trade.exit_price,
-                           quantity=trade.quantity,
-                           details=(("entry_time", trade.entry_time.isoformat()),
-                                    ("entry_price", trade.entry_price),
-                                    ("exit_time", trade.exit_time.isoformat()),
-                                    ("exit_price", trade.exit_price),
-                                    ("gross_pnl", trade.gross_pnl),
-                                    ("net_pnl", trade.net_pnl)))
+                    record_closed_trade(prior, order, i, "strategy_close_signal",
+                                        len(trades) + 1)
                     position = None
-            signal = strategy.on_bar(StrategyContext(i, BarHistory(data, i + 1), bar))
             pending = None
+            if (position_at_bar_start is not None
+                    and position is position_at_bar_start
+                    and position.stop_loss is not None):
+                stop = position.stop_loss
+                if position.side is Side.LONG and bar.low <= stop:
+                    finish_stop_position(position, bar, i, bar.open if bar.open <= stop else stop,
+                                         stop, "stop_loss")
+                elif position.side is Side.SHORT and bar.high >= stop:
+                    finish_stop_position(position, bar, i, bar.open if bar.open >= stop else stop,
+                                         stop, "stop_loss")
+
+            if pending_stop is not None and position is None:
+                stop_signal, created_bar, created_index, stop_order_id = pending_stop
+                if i > created_index:
+                    trigger = stop_signal.trigger_price
+                    assert trigger is not None and stop_signal.side is not None
+                    hit = (bar.high >= trigger if stop_signal.side is Side.LONG
+                           else bar.low <= trigger)
+                    if hit:
+                        if stop_signal.side is Side.LONG:
+                            reference = bar.open if bar.open >= trigger else trigger
+                        else:
+                            reference = bar.open if bar.open <= trigger else trigger
+                        qty = stop_signal.quantity if stop_signal.quantity is not None else self.settings.position_size
+                        trade_id = len(trades) + 1
+                        order = fill(OrderAction.OPEN, stop_signal.side, qty,
+                                     created_bar.timestamp, bar, reference,
+                                     order_type=OrderType.STOP, trigger_price=trigger,
+                                     stop_loss=stop_signal.stop_loss,
+                                     replace_sequence=stop_order_id)
+                        record(ExecutionEventType.ORDER_TRIGGERED, bar.timestamp, i,
+                               action=OrderAction.OPEN, side=order.side,
+                               order_id=order.sequence, order_type=OrderType.STOP,
+                               trade_id=trade_id, price=reference, quantity=qty,
+                               trigger_price=trigger, stop_loss=order.stop_loss,
+                               reason="stop_triggered")
+                        record(ExecutionEventType.EXECUTION, bar.timestamp, i,
+                               action=OrderAction.OPEN, side=order.side,
+                               order_id=order.sequence, order_type=OrderType.STOP,
+                               trade_id=trade_id, price=order.fill_price,
+                               quantity=qty, trigger_price=trigger,
+                               stop_loss=order.stop_loss,
+                               reason="stop_entry",
+                               details=(("reference_price", order.reference_price),
+                                        ("commission", order.commission),
+                                        ("spread_cost", order.spread_cost),
+                                        ("slippage_cost", order.slippage_cost)))
+                        position = Position(order.side, qty, bar.timestamp, order.fill_price,
+                                            order.commission, order.stop_loss)
+                        record(ExecutionEventType.POSITION_OPENED, bar.timestamp, i,
+                               action=OrderAction.OPEN, side=position.side,
+                               order_id=order.sequence, order_type=order.order_type,
+                               trade_id=trade_id, price=position.entry_price,
+                               quantity=position.quantity, stop_loss=position.stop_loss)
+                        pending_stop = None
+
+            signal = strategy.on_bar(StrategyContext(i, BarHistory(data, i + 1), bar))
             if signal is not None:
-                executable = i + 1 < len(data) and (
-                    (signal.action is OrderAction.OPEN and position is None)
-                    or (signal.action is OrderAction.CLOSE and position is not None)
-                )
-                trade_id = len(trades) + 1 if executable else None
-                record(ExecutionEventType.SIGNAL, bar.timestamp, i,
-                       action=signal.action, side=signal.side, trade_id=trade_id,
-                       quantity=signal.quantity,
-                       details=(("strategy_reason", "not exposed by Signal"),))
-                if executable:
-                    order_id = len(orders) + 1
-                    order_side = signal.side if signal.action is OrderAction.OPEN else position.side
-                    order_quantity = (signal.quantity if signal.quantity is not None
-                                      else self.settings.position_size) if signal.action is OrderAction.OPEN else position.quantity
-                    record(ExecutionEventType.ORDER_CREATED, bar.timestamp, i,
-                           action=signal.action, side=order_side, order_id=order_id,
-                           trade_id=trade_id, quantity=order_quantity,
-                           reason="market_signal_next_bar_open")
-                    pending = (signal, bar, trade_id)
-                else:
-                    pending = (signal, bar, None)
+                if signal.action is OrderAction.MODIFY_STOP:
+                    record(ExecutionEventType.SIGNAL, bar.timestamp, i,
+                           action=signal.action, side=position.side if position else None,
+                           stop_loss=signal.stop_loss,
+                           details=(("strategy_reason", "not exposed by Signal"),))
+                    if position is None:
+                        raise ValueError("Cannot modify stop_loss without an open position")
+                    old_stop = position.stop_loss
+                    position = replace(position, stop_loss=signal.stop_loss)
+                    record(ExecutionEventType.STOP_UPDATED, bar.timestamp, i,
+                           action=OrderAction.MODIFY_STOP, side=position.side,
+                           stop_loss=position.stop_loss,
+                           details=(("previous_stop_loss", old_stop),))
+                    signal = None
+                if signal is not None and signal.order_type is OrderType.STOP:
+                    if position is not None:
+                        raise ValueError("Cannot create a STOP entry while a position is open")
+                    if pending_stop is not None:
+                        raise ValueError("Only one pending STOP entry is supported")
+                    executable = i + 1 < len(data)
+                    trade_id = len(trades) + 1 if executable else None
+                    record(ExecutionEventType.SIGNAL, bar.timestamp, i,
+                           action=signal.action, side=signal.side,
+                           order_type=OrderType.STOP, trade_id=trade_id,
+                           quantity=signal.quantity,
+                           trigger_price=signal.trigger_price,
+                           stop_loss=signal.stop_loss,
+                           details=(("strategy_reason", "not exposed by Signal"),))
+                    if executable:
+                        qty = signal.quantity if signal.quantity is not None else self.settings.position_size
+                        if not isfinite(qty) or qty <= 0:
+                            raise ValueError("Open signals require a side and positive finite quantity")
+                        trade_id = len(trades) + 1
+                        order_id = len(orders) + 1
+                        order = Order(order_id, bar.timestamp, None, OrderAction.OPEN,
+                                      signal.side, qty, signal.trigger_price, None,
+                                      0.0, 0.0, 0.0, OrderType.STOP, OrderStatus.PENDING,
+                                      signal.trigger_price, signal.stop_loss)
+                        orders.append(order)
+                        record(ExecutionEventType.ORDER_CREATED, bar.timestamp, i,
+                               action=OrderAction.OPEN, side=signal.side,
+                               order_id=order_id, order_type=OrderType.STOP,
+                               trade_id=trade_id, quantity=qty,
+                               trigger_price=signal.trigger_price,
+                               stop_loss=signal.stop_loss, reason="stop_entry_pending")
+                        record(ExecutionEventType.ORDER_PENDING, bar.timestamp, i,
+                               action=OrderAction.OPEN, side=signal.side,
+                               order_id=order_id, order_type=OrderType.STOP,
+                               trade_id=trade_id, quantity=qty,
+                               trigger_price=signal.trigger_price,
+                               stop_loss=signal.stop_loss, reason="eligible_next_bar")
+                        pending_stop = (signal, bar, i, order_id)
+                elif signal is not None:
+                    if signal.action is OrderAction.OPEN and pending_stop is not None:
+                        raise ValueError("Cannot create a market entry while a STOP entry is pending")
+                    executable = i + 1 < len(data) and (
+                        (signal.action is OrderAction.OPEN and position is None)
+                        or (signal.action is OrderAction.CLOSE and position is not None)
+                    )
+                    trade_id = len(trades) + 1 if executable else None
+                    record(ExecutionEventType.SIGNAL, bar.timestamp, i,
+                           action=signal.action, side=signal.side, trade_id=trade_id,
+                           quantity=signal.quantity,
+                           details=(("strategy_reason", "not exposed by Signal"),))
+                    if executable:
+                        order_id = len(orders) + 1
+                        order_side = signal.side if signal.action is OrderAction.OPEN else position.side
+                        order_quantity = (signal.quantity if signal.quantity is not None
+                                          else self.settings.position_size) if signal.action is OrderAction.OPEN else position.quantity
+                        record(ExecutionEventType.ORDER_CREATED, bar.timestamp, i,
+                               action=signal.action, side=order_side, order_id=order_id,
+                               order_type=OrderType.MARKET,
+                               trade_id=trade_id, quantity=order_quantity,
+                               reason="market_signal_next_bar_open")
+                        pending = (signal, bar, trade_id)
+                    else:
+                        pending = (signal, bar, None)
             unrealized = self._unrealized(position, bar.close, bar.spread)
             direction = 0 if position is None else (1 if position.side is Side.LONG else -1)
             marked_value = 0.0 if position is None else direction * position.quantity * (
@@ -186,33 +349,8 @@ class BacktestEngine:
                             ("commission", order.commission),
                             ("spread_cost", order.spread_cost),
                             ("slippage_cost", order.slippage_cost)))
-            gross = (order.fill_price - prior.entry_price) * prior.quantity * (1 if prior.side is Side.LONG else -1)
-            net = gross - prior.entry_commission - order.commission
-            realized += net
-            trade = Trade(len(trades) + 1, prior.side, prior.quantity,
-                prior.entry_time, last.timestamp, prior.entry_price, order.fill_price,
-                prior.entry_commission, order.commission, gross, net)
-            record(ExecutionEventType.POSITION_CLOSED, last.timestamp, len(data) - 1,
-                   action=OrderAction.CLOSE, side=prior.side, order_id=order.sequence,
-                   trade_id=trade.sequence, price=order.fill_price,
-                   quantity=prior.quantity, reason="end_of_data_liquidation")
-            record(ExecutionEventType.PNL_CALCULATED, last.timestamp, len(data) - 1,
-                   side=trade.side, order_id=order.sequence, trade_id=trade.sequence,
-                   price=trade.exit_price, quantity=trade.quantity,
-                   details=(("gross_pnl", trade.gross_pnl),
-                            ("entry_commission", trade.entry_commission),
-                            ("exit_commission", trade.exit_commission),
-                            ("net_pnl", trade.net_pnl)))
-            trades.append(trade)
-            record(ExecutionEventType.TRADE_CREATED, last.timestamp, len(data) - 1,
-                   side=trade.side, order_id=order.sequence, trade_id=trade.sequence,
-                   price=trade.exit_price, quantity=trade.quantity,
-                   details=(("entry_time", trade.entry_time.isoformat()),
-                            ("entry_price", trade.entry_price),
-                            ("exit_time", trade.exit_time.isoformat()),
-                            ("exit_price", trade.exit_price),
-                            ("gross_pnl", trade.gross_pnl),
-                            ("net_pnl", trade.net_pnl)))
+            record_closed_trade(prior, order, len(data) - 1,
+                                "end_of_data_liquidation", trade_id)
             position = None
             curve[-1] = EquityPoint(last.timestamp, cash, 0.0, cash)
 

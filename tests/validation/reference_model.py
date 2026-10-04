@@ -105,3 +105,106 @@ def calculate(rows, events, *, initial_cash=1_000.0, quantity=1.0,
             "drawdown": drawdown, "statistics": {"final_equity": final_equity},
             "final_cash": cash, "unrealized_pnl": unrealized,
             "final_equity": final_equity}
+
+
+def calculate_single_stop_trade(rows, *, signal_index, side, trigger, stop_loss,
+                                quantity=1.0, initial_cash=1_000.0,
+                                commission_per_unit=0.0, commission_rate=0.0,
+                                slippage=0.0, spread_scale=1.0):
+    """Independent primitive oracle for one pending STOP entry and SL exit.
+
+    ``rows`` are plain mappings with time/open/high/low/close/spread keys.
+    A STOP becomes eligible on the bar after the signal. The oracle intentionally
+    handles only one entry/exit and implements OHLC assumptions here rather
+    than importing production models or execution helpers.
+    """
+    direction = 1 if side == "long" else -1
+    entry_row = None
+    entry_reference = None
+    for row in rows[signal_index + 1:]:
+        if side == "long" and row["high"] >= trigger:
+            entry_reference = row["open"] if row["open"] >= trigger else trigger
+            entry_row = row
+            break
+        if side == "short" and row["low"] <= trigger:
+            entry_reference = row["open"] if row["open"] <= trigger else trigger
+            entry_row = row
+            break
+
+    if entry_row is None:
+        return {"entry": None, "exit": None, "trade": None,
+                "final_equity": initial_cash, "final_cash": initial_cash,
+                "equity": [initial_cash for _ in rows], "drawdown": [0.0 for _ in rows]}
+
+    def fill(reference, row, action):
+        half_spread = row["spread"] * spread_scale / 2
+        adverse = direction if action == "open" else -direction
+        price = reference + adverse * (half_spread + slippage)
+        commission = quantity * (commission_per_unit + abs(price) * commission_rate)
+        return price, commission, half_spread * quantity, slippage * quantity
+
+    entry_price, entry_commission, entry_spread, entry_slippage = fill(
+        entry_reference, entry_row, "open")
+    cash = initial_cash - direction * quantity * entry_price - entry_commission
+    equity = []
+    entry_index = rows.index(entry_row, signal_index + 1)
+    exit_row = None
+    exit_reference = None
+    for index, row in enumerate(rows):
+        if index < entry_index:
+            equity.append(initial_cash)
+            continue
+        if index == entry_index:
+            # Entry-bar SL is deliberately not applied; OHLC cannot identify path.
+            mark = row["close"] - direction * row["spread"] * spread_scale / 2
+            equity.append(cash + direction * quantity * mark)
+            continue
+        touched = row["low"] <= stop_loss if side == "long" else row["high"] >= stop_loss
+        if touched:
+            exit_reference = ((row["open"] if row["open"] <= stop_loss else stop_loss)
+                              if side == "long" else
+                              (row["open"] if row["open"] >= stop_loss else stop_loss))
+            exit_row = row
+            break
+        mark = row["close"] - direction * row["spread"] * spread_scale / 2
+        equity.append(cash + direction * quantity * mark)
+
+    if exit_row is None:
+        last = rows[-1]
+        mark = last["close"] - direction * last["spread"] * spread_scale / 2
+        final_equity = cash + direction * quantity * mark
+        equity.extend([final_equity] * (len(rows) - len(equity)))
+        return {"entry": {"time": entry_row["time"], "price": entry_price,
+                           "reference": entry_reference, "commission": entry_commission},
+                "exit": None, "trade": None, "final_equity": final_equity,
+                "final_cash": cash, "equity": equity, "drawdown": _drawdowns(equity)}
+
+    exit_price, exit_commission, exit_spread, exit_slippage = fill(
+        exit_reference, exit_row, "close")
+    cash += direction * quantity * exit_price - exit_commission
+    gross = (exit_price - entry_price) * quantity * direction
+    net = gross - entry_commission - exit_commission
+    final_equity = cash
+    # Replace the mark on stop bar with realized cash after its exit.
+    exit_index = rows.index(exit_row, entry_index + 1)
+    equity.extend([final_equity] * (exit_index + 1 - len(equity)))
+    equity.extend([final_equity] * (len(rows) - len(equity)))
+    return {"entry": {"time": entry_row["time"], "price": entry_price,
+                       "reference": entry_reference, "commission": entry_commission,
+                       "spread_cost": entry_spread, "slippage_cost": entry_slippage},
+            "exit": {"time": exit_row["time"], "price": exit_price,
+                      "reference": exit_reference, "commission": exit_commission,
+                      "spread_cost": exit_spread, "slippage_cost": exit_slippage},
+            "trade": {"side": side, "quantity": quantity, "gross_pnl": gross,
+                      "net_pnl": net, "commission": entry_commission + exit_commission},
+            "final_equity": final_equity, "final_cash": cash,
+            "equity": equity, "drawdown": _drawdowns(equity)}
+
+
+def _drawdowns(values):
+    peak = None
+    result = []
+    for value in values:
+        peak = value if peak is None else max(peak, value)
+        result.append(peak - value)
+    return result

@@ -19,7 +19,8 @@ class EventDifference:
 
 _EVENT_FIELDS = (
     "sequence", "timestamp", "event_type", "bar_index", "action", "side", "order_id",
-    "trade_id", "price", "quantity", "reason", "details",
+    "trade_id", "price", "quantity", "trigger_price", "stop_loss",
+    "order_type", "reason", "details",
 )
 
 

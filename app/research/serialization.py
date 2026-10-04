@@ -13,7 +13,7 @@ from app.analysis.models import (
 )
 from app.backtest.models import (
     BacktestResult, EquityPoint, ExecutionEvent, ExecutionEventType, Order,
-    OrderAction, Position, Side, Trade,
+    OrderAction, OrderStatus, OrderType, Position, Side, Trade,
 )
 from app.backtest.runner import BacktestRunConfig
 from app.research.models import (
@@ -49,7 +49,7 @@ _DATACLASSES = {
     )
 }
 _ENUMS = {cls.__name__: cls for cls in (
-    OrderAction, Side, ExecutionEventType, ExperimentPhase, ExperimentStatus,
+    OrderAction, OrderStatus, OrderType, Side, ExecutionEventType, ExperimentPhase, ExperimentStatus,
 )}
 
 

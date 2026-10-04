@@ -25,14 +25,28 @@ class Side(str, Enum):
 class OrderAction(str, Enum):
     OPEN = "open"
     CLOSE = "close"
+    MODIFY_STOP = "modify_stop"
+
+
+class OrderType(str, Enum):
+    MARKET = "market"
+    STOP = "stop"
+
+
+class OrderStatus(str, Enum):
+    PENDING = "pending"
+    FILLED = "filled"
 
 
 class ExecutionEventType(str, Enum):
     BAR = "bar"
     SIGNAL = "signal"
     ORDER_CREATED = "order_created"
+    ORDER_PENDING = "order_pending"
+    ORDER_TRIGGERED = "order_triggered"
     EXECUTION = "execution"
     POSITION_OPENED = "position_opened"
+    STOP_UPDATED = "stop_updated"
     POSITION_CLOSED = "position_closed"
     TRADE_CREATED = "trade_created"
     PNL_CALCULATED = "pnl_calculated"
@@ -54,6 +68,9 @@ class ExecutionEvent:
     quantity: float | None = None
     reason: str | None = None
     details: tuple[tuple[str, Any], ...] = ()
+    order_type: OrderType | None = None
+    trigger_price: float | None = None
+    stop_loss: float | None = None
 
     def __str__(self) -> str:
         fields = [f"[{self.event_type.value.upper()}] {self.timestamp.isoformat()}"]
@@ -65,12 +82,18 @@ class ExecutionEvent:
             fields.append(f"side={self.side.value.upper()}")
         if self.order_id is not None:
             fields.append(f"order_id={self.order_id}")
+        if self.order_type is not None:
+            fields.append(f"order_type={self.order_type.value.upper()}")
         if self.trade_id is not None:
             fields.append(f"trade_id={self.trade_id}")
         if self.price is not None:
             fields.append(f"price={self.price:g}")
         if self.quantity is not None:
             fields.append(f"quantity={self.quantity:g}")
+        if self.trigger_price is not None:
+            fields.append(f"trigger_price={self.trigger_price:g}")
+        if self.stop_loss is not None:
+            fields.append(f"stop_loss={self.stop_loss:g}")
         if self.reason is not None:
             fields.append(f"reason={self.reason}")
         fields.extend(f"{key}={value}" for key, value in self.details)
@@ -84,28 +107,52 @@ class Signal:
     action: OrderAction
     side: Side | None = None
     quantity: float | None = None
+    order_type: OrderType = OrderType.MARKET
+    trigger_price: float | None = None
+    stop_loss: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "action", OrderAction(self.action))
+        object.__setattr__(self, "order_type", OrderType(self.order_type))
         if self.side is not None:
             object.__setattr__(self, "side", Side(self.side))
         if self.quantity is not None and (not isfinite(self.quantity) or self.quantity <= 0):
             raise ValueError("Signal quantity must be finite and positive")
+        if self.trigger_price is not None and not isfinite(self.trigger_price):
+            raise ValueError("Signal trigger_price must be finite")
+        if self.stop_loss is not None and not isfinite(self.stop_loss):
+            raise ValueError("Signal stop_loss must be finite")
+        if self.action is OrderAction.MODIFY_STOP:
+            if self.order_type is not OrderType.MARKET or self.trigger_price is not None:
+                raise ValueError("Stop modifications cannot be pending order types")
+            if self.stop_loss is None:
+                raise ValueError("Stop modifications require a stop_loss value")
+        elif self.order_type is OrderType.STOP:
+            if self.action is not OrderAction.OPEN:
+                raise ValueError("STOP orders are supported only for opening positions")
+            if self.side is None or self.trigger_price is None:
+                raise ValueError("STOP entry signals require a side and trigger_price")
+        elif self.trigger_price is not None:
+            raise ValueError("Market signals cannot specify trigger_price")
 
 
 @dataclass(frozen=True, slots=True)
 class Order:
     sequence: int
     created_at: datetime
-    filled_at: datetime
+    filled_at: datetime | None
     action: OrderAction
     side: Side
     quantity: float
     reference_price: float
-    fill_price: float
+    fill_price: float | None
     commission: float
     spread_cost: float
     slippage_cost: float
+    order_type: OrderType = OrderType.MARKET
+    status: OrderStatus = OrderStatus.FILLED
+    trigger_price: float | None = None
+    stop_loss: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -115,6 +162,7 @@ class Position:
     entry_time: datetime
     entry_price: float
     entry_commission: float
+    stop_loss: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
