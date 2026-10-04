@@ -8,14 +8,18 @@ from tests.validation.support import bars
 class PrefixOnlyStrategy:
     def __init__(self):
         self.observed = []
+        self.signals = []
 
     def on_bar(self, context):
         self.observed.append(tuple(item.timestamp for item in context.history))
         if context.index == 0:
-            return Signal(OrderAction.OPEN, Side.LONG)
-        if context.index == 1:
-            return Signal(OrderAction.CLOSE)
-        return None
+            signal = Signal(OrderAction.OPEN, Side.LONG)
+        elif context.index == 1:
+            signal = Signal(OrderAction.CLOSE)
+        else:
+            signal = None
+        self.signals.append(signal)
+        return signal
 
 
 def test_strategy_history_is_only_current_completed_prefix():
@@ -32,10 +36,13 @@ def test_changing_only_future_bars_cannot_change_earlier_trade_decisions_or_equi
                 low=10_000 + index, close=10_000 + index)
         for index, bar in enumerate(original[3:], start=3)
     )
-    first = BacktestEngine().run(original, PrefixOnlyStrategy())
-    second = BacktestEngine().run(adversarial, PrefixOnlyStrategy())
+    first_strategy, second_strategy = PrefixOnlyStrategy(), PrefixOnlyStrategy()
+    first = BacktestEngine().run(original, first_strategy)
+    second = BacktestEngine().run(adversarial, second_strategy)
 
-    assert first.orders[:2] == second.orders[:2]
+    # The closed trade and both of its fills are wholly within the shared prefix.
+    assert first_strategy.signals[:3] == second_strategy.signals[:3]
+    assert first.orders == second.orders
     assert first.trades == second.trades
     assert first.equity_curve[:3] == second.equity_curve[:3]
 

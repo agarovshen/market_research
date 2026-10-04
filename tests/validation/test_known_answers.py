@@ -1,7 +1,9 @@
 """Manually calculated outcomes for the documented next-bar-open engine."""
 
+from datetime import timedelta
+
 from app.analysis import AnalysisEngine
-from app.backtest import BacktestEngine, BacktestSettings, OrderAction, Side, Signal
+from app.backtest import BacktestEngine, BacktestSettings, Bar, OrderAction, Side, Signal
 
 from tests.validation.support import bars
 
@@ -105,3 +107,34 @@ def test_drawdown_matches_independent_equity_arithmetic():
     # Percentage drawdown uses signed return-from-peak convention.
     assert analysis.drawdown.max_drawdown_pct == -30 / 1_010
     assert all(point.peak_equity >= point.equity for point in analysis.equity_analysis)
+
+
+def test_exact_threshold_signal_and_threshold_not_reached():
+    class Threshold:
+        def __init__(self, threshold):
+            self.threshold = threshold
+            self.sent = False
+
+        def on_bar(self, context):
+            if not self.sent and context.bar.close >= self.threshold:
+                self.sent = True
+                return Signal(OrderAction.OPEN, Side.LONG)
+            return None
+
+    start = bars(10)[0].timestamp
+    exact = (Bar(start, 10, 10, 10, 10),
+             Bar(start + timedelta(minutes=1), 12, 12, 12, 12))
+    result = BacktestEngine(BacktestSettings(initial_cash=100)).run(exact, Threshold(10))
+    # Equality qualifies. The bar-0 signal buys next open=12, then final
+    # liquidation at close=12: one flat trade, equity stays at 100.
+    assert len(result.trades) == 1
+    assert (result.trades[0].entry_time, result.trades[0].exit_time) == (exact[1].timestamp, exact[1].timestamp)
+    assert (result.trades[0].entry_price, result.trades[0].exit_price) == (12, 12)
+    assert result.trades[0].gross_pnl == 0
+    assert result.final_equity == 100
+
+    missed = (Bar(start, 9.99, 10, 9.99, 9.99), exact[1])
+    no_signal = BacktestEngine(BacktestSettings(initial_cash=100)).run(missed, Threshold(10))
+    assert no_signal.orders == ()
+    assert no_signal.trades == ()
+    assert no_signal.final_equity == 100

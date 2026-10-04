@@ -1,63 +1,118 @@
 # Backtest validation protocol
 
-This suite checks the existing `BacktestEngine`, `BacktestRunner`,
-`AnalysisEngine`, and `ResearchEngine` against hand-calculated fixtures,
-independent arithmetic, adversarial future data, and the repository's stated
-interfaces. Passing means the implementation is **validated against the tested
-assumptions and fixtures**. It is not proof of universal correctness, market
-realism, strategy profitability, or future performance.
+The tests exercise the existing `BacktestEngine`, `BacktestRunner`,
+`AnalysisEngine`, and `ResearchEngine`. **The engine is validated against the
+tested assumptions, independent reference calculations, and fixtures.** This
+does not establish correctness for every input or strategy.
 
-## Coverage and limits
+## Evidence currently covered
 
-Known-answer tests document next-bar-open entry/exit timing, long/short PnL,
-costs, cash/equity, drawdown, flat/loss/win/multiple/no trade paths, and empty
-and one-bar cases. Execution currently means the engine's supported market
-signals; stops, targets, pending limit/stop orders, cancellation, and rejection
-are not implemented or asserted. Data tests record actual behavior: timestamps
-must be strictly increasing, gaps are allowed, OHLC/spread must be valid,
-finite values are required, and consistently aware timestamps are accepted.
-The runner/research tests cover half-open research phases, OOS selection,
-walk-forward separation, deterministic repeats, and persistence round trips.
-Advanced tests check seed repeatability and limited known arithmetic; they do
-not validate statistical assumptions as claims about real markets.
+**Validated:**
 
-## Adding a known-answer fixture
+- Exact known-answer trade arithmetic for long and short winners/losers, flat,
+  multiple and no-trade paths, quantities, costs, threshold equality/miss,
+  next-bar fills, final liquidation, equity, and drawdown.
+- Independent calculations in `reference_model.py`, using primitive rows and
+  scripted intent tuples only. It does not import application code and models
+  only next-bar-open market intents, configured spread/slippage/commission,
+  close marking, and final liquidation. One explicit synthetic
+  historical-style OHLC path is compared end to end with production orders,
+  trades, costs, equity, drawdown, and final equity. Its prices are authored
+  test data, not exchange/vendor history; no real historical dataset is
+  bundled in this repository.
+- Accounting reconciliation against independently calculated net PnL and
+  marked unrealized value, including seeded valid OHLC paths and quantity
+  scaling.
+- Half-open research boundaries; future-prefix invariance for strategy
+  signals, orders, completed trades, fills, PnL, and equity inside the shared
+  prefix; training/OOS selection isolation; walk-forward window separation;
+  deterministic repeats; and result persistence round trips.
+- Selected advanced calculations under explicit small fixtures, including
+  seeded Monte Carlo repeatability and drawdown arithmetic.
+- Structured first-divergence output. It identifies the first differing trade
+  field, shows equal fields before it, gives expected and actual values, and
+  marks later fields in that trade not comparable. Numeric absolute/relative
+  tolerances are optional.
 
-Write the bars and strategy instructions explicitly. Before asserting any
-result, state the timeline and arithmetic in comments: signal timestamp, next
-bar fill timestamp and price, side/quantity, gross PnL formula, each cost, net
-PnL, cash/equity marks, and drawdown from the listed equity observations.
-Never compute an expected result by calling engine or analysis code. Keep a
-fixture small enough that each expected value can be checked by hand.
+Data behavior tested against current code:
 
-## External reference / MT5 comparison
+| Condition | Observed behavior |
+| --- | --- |
+| Strictly sorted timestamps | Accepted |
+| Unsorted or duplicate timestamps | Rejected with `ValueError` |
+| Missing time intervals / gaps | Accepted; calendar continuity is not checked |
+| Empty input / one row | Accepted |
+| NaN/infinite price or invalid OHLC / negative spread | Rejected with `ValueError` |
+| Null numeric price | Fails numeric validation with `TypeError`; it is not normalized |
+| Consistently aware timestamps | Accepted |
+| Mixed naive/aware timestamps | Rejected during ordering comparison (`TypeError`) |
+| Insufficient SMA warm-up | Strategy emits no signal before its required history |
 
-Export reference data into a structured JSON-compatible mapping with `trades`
-(ordered records containing side, entry/exit timestamps and prices, quantity,
-commission, fees, slippage, and PnL), plus ordered `equity`, `drawdown`, and
-`statistics` sections. Normalize timezone, symbol precision, quantity units,
-commission convention, spread convention, and whether timestamps denote bar
-open or close before comparison. `tests.validation.reference.first_difference`
-reports the first divergent ordered field and numeric delta, with optional
-absolute and relative tolerances. Preserve the raw export and record platform,
-feed, settings, and normalization choices alongside it. No MT5 output is
-bundled or fabricated here; where automated MT5 execution is unavailable, run
-the reference export manually and compare the normalized result.
+The engine supports market signals that fill on the next bar open. Stop/target,
+limit, cancellation, rejection, gap-trigger and intrabar ordering semantics do
+not exist in this contract. The exact-threshold fixture validates a strategy
+rule's equality boundary, not a broker trigger order. Strategy-specific
+warm-up rules remain the strategy's responsibility.
 
-## Interpreting mismatches
+## Independence and adding fixtures
 
-Investigate the earliest difference first: a wrong fill time or price can
-explain every later PnL/equity mismatch. Check data ordering and bars, interval
-boundaries, signal timing, fill convention, cost units, and liquidation policy
-before treating a final-statistic difference as an accounting defect. Add a
-focused regression fixture and change production only when the expected
-contract is established independently.
+`reference_model.py` intentionally does not model the full production design.
+It accepts dictionaries of primitive timestamp/OHLC values and event tuples,
+then uses explicit arithmetic for fill prices, cash changes, PnL, costs, marks,
+and drawdown. Keep it test-only and narrow. Do not import engine, analysis, or
+production accounting helpers into it.
 
-Known assumptions include a single instrument, one net position, next-bar
-open market fills, configured spread/slippage/commission, and current
-final-liquidation settings. Indicator warm-up behavior is strategy-owned.
-External execution parity, all broker conventions, and all possible strategy
-implementations remain unverified.
+For a new known answer, write small explicit OHLC rows and a human-readable
+rule. State when the rule emits an intent, the next-bar fill timestamp/price,
+direction and quantity, PnL formula, costs, equity observations, and drawdown.
+Calculate expected numbers from the written assumptions, never from the
+implementation under test. For a differential fixture, give the primitive
+reference calculation its own events and compare its output with a projection
+of production output. Do not build the expected mapping from production
+trade/PnL fields.
 
-Run with `python -m pytest tests/validation` and the full suite with
-`python -m pytest`.
+Seeded property tests should assert mathematical relationships guaranteed by
+the configured model (direction, scaling, costs, equity, and nonnegative
+drawdown), not specific random output beyond the fixed seed. If changing the
+seed, keep the generated OHLC valid and record the seed in assertion messages.
+
+## External references and MT5
+
+MT5 parity is optional external validation. The core validation suite does not
+depend on MT5. No MT5 output is bundled or fabricated, and there is no Wine or
+terminal automation.
+
+An optional external export can use a JSON-compatible mapping with ordered
+`orders`, `trades`, `equity`, `drawdown`, and `statistics`. Include trade side,
+entry/exit timestamps and prices, quantity, commission, fees, slippage, gross
+and net PnL, and final statistics. Normalize timezone, symbol precision,
+quantity units, cost conventions, and timestamp meaning before comparison.
+Preserve raw data and record the source and normalization. Call
+`tests.validation.reference.first_difference(actual, expected, ...)` to see
+the first divergence; `actual` is the engine projection, and `expected` is the
+external/reference result. Tolerances are explicit and should match known
+precision limits rather than conceal a mismatch.
+
+## Interpreting mismatches and limits
+
+Investigate the first differing field. A fill-time/price difference can
+explain later PnL and equity differences. Check bars and timestamp boundaries,
+signal timing, fill convention, quantity, commission/spread/slippage units,
+and final-liquidation settings. Only change production after a focused fixture
+establishes the intended contract and demonstrates a real defect.
+
+**Not universally proven:** every possible strategy; every order type or
+intrabar ambiguity; every broker execution model or data vendor; live broker
+behavior; all market regimes; or correctness for all historical data. The
+tests cannot establish strategy profitability or future performance.
+
+Run validation twice and the complete Python suite with:
+
+```sh
+python -m pytest tests/validation
+python -m pytest tests/validation
+python -m pytest
+```
+
+Node tests are run with `node --test tests/*.test.cjs`; compilation and patch
+hygiene with `python -m compileall .` and `git diff --check`.

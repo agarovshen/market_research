@@ -10,7 +10,7 @@ def test_reference_report_identifies_first_trade_field_and_delta():
     assert difference.location == "Trade #1"
     assert difference.field == "entry_price"
     assert abs(difference.delta + .0001) < 1e-12
-    assert "+" in str(difference) or "-" in str(difference)
+    assert "actual:" in str(difference)
 
 
 def test_reference_tolerance_and_later_sections():
@@ -20,4 +20,4 @@ def test_reference_tolerance_and_later_sections():
     ours["trades"][0]["pnl"] = ref["trades"][0]["pnl"]
     ours["statistics"] = {"final_equity": 10}
     ref["statistics"] = {"final_equity": 11}
-    assert first_difference(ours, ref).field == "value"
+    assert first_difference(ours, ref).field == "final_equity"

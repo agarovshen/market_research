@@ -43,3 +43,17 @@ def test_mixed_naive_and_aware_timestamps_are_rejected_by_order_comparison():
 def test_consistently_aware_timestamps_are_accepted():
     aware = tuple(replace(bar, timestamp=bar.timestamp.replace(tzinfo=timezone.utc)) for bar in bars(10, 11))
     assert len(BacktestEngine().run(aware, NoSignals()).equity_curve) == 2
+
+
+def test_null_price_is_not_normalized_and_fails_numeric_validation():
+    with pytest.raises(TypeError):
+        BacktestEngine().run((replace(bars(10)[0], close=None),), NoSignals())
+
+
+def test_insufficient_sma_history_emits_no_signal():
+    from app.strategies.sma_crossover import SMACrossover
+
+    result = BacktestEngine().run(bars(10, 11, 9), SMACrossover(fast_period=2, slow_period=3))
+    # The strategy requires slow_period + 1 completed bars; only three exist.
+    assert result.orders == ()
+    assert result.trades == ()
