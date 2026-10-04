@@ -11,7 +11,9 @@ It does not create another result type or calculate analysis metrics.
 
 - Scalars: `initial_cash`, `final_cash`, `final_equity`, `realized_pnl`,
   `unrealized_pnl`, `total_commission`, `total_spread_cost`,
-  `total_slippage_cost`.
+  `total_slippage_cost`, and Forex-mode `balance`, `lots`, `units`,
+  `contract_size`, `leverage`, `margin_used`, `free_margin`, and
+  `margin_level` (`None` while no margin is reserved).
 - `open_position`: a `Position` or `None`.
 - `orders`: ordered tuple of `Order` records. Each has a sequence, signal and
   fill timestamps (`created_at`, optional `filled_at`), action, side, type,
@@ -21,11 +23,21 @@ It does not create another result type or calculate analysis metrics.
   quantity, entry/exit timestamps and prices, entry/exit commission, gross PnL,
   and net PnL.
 - `equity_curve`: ordered tuple of `EquityPoint` records with timestamp, cash,
-  unrealized PnL, and equity.
+  unrealized PnL, equity, margin used, free margin, and optional margin level.
 - `execution_trace`: ordered immutable `ExecutionEvent` records observing the
   same engine path. `format_execution_trace()` renders the complete stream;
   `format_trade_lifecycle(sequence)` filters one completed trade and then
   prints its canonical `Trade` fields.
+
+Forex Test setup accepts `lots`; the engine converts lots to base units using
+`contract_size`. Leverage determines required margin only and does not enter
+the PnL calculation. In Forex sizing mode, balance changes by commissions and
+realized PnL, equity is balance plus unrealized PnL, and account snapshots
+include used/free margin and nullable margin level. Position `notional` and
+initial `margin` use fill price; the account snapshot's `margin_used` marks
+open units at the current bar close. Direct legacy callers may
+continue to supply `quantity`/`position_size` as internal units when `lots` is
+omitted.
 
 MARKET signals use completed-bar context and are eligible for execution at the
 next bar's open. A STOP opening signal creates one pending STOP order; it

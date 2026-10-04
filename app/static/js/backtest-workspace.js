@@ -136,7 +136,9 @@
             start: fields.get("start"),
             end: fields.get("end"),
             initial_cash: Number(fields.get("initial_cash")),
-            position_size: Number(fields.get("position_size")),
+            lots: Number(fields.get("lots")),
+            leverage: Number(fields.get("leverage")),
+            contract_size: Number(fields.get("contract_size")),
             commission_per_unit: Number(fields.get("commission_per_unit")),
             commission_rate: Number(fields.get("commission_rate")),
             spread_scale: Number(fields.get("spread_scale")),
@@ -165,6 +167,12 @@
             ["Completed trades", analysis.trades?.total_trades ?? "—"],
             ["Win rate", displayValue(analysis.trades?.win_rate, true)],
             ["Max drawdown", displayValue(analysis.drawdown?.max_drawdown_pct, true)],
+            ["Balance", displayValue(row.backtest_result?.balance)],
+            ["Equity", displayValue(row.backtest_result?.final_equity)],
+            ["Margin used", displayValue(row.backtest_result?.margin_used)],
+            ["Free margin", displayValue(row.backtest_result?.free_margin)],
+            ["Margin level", row.backtest_result?.margin_level == null
+                ? "—" : `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 }).format(row.backtest_result.margin_level)}%`],
         ];
         $("test-result-metrics").replaceChildren(...metrics.map(([title, value]) => {
             const item = document.createElement("div");

@@ -82,6 +82,10 @@ class ResearchRunRequest(BaseModel):
     step_days: int | None = Field(default=None, ge=1, le=10000)
     anchored: bool = True
     initial_cash: float = Field(default=100000, gt=0)
+    lots: float | None = Field(default=None, gt=0)
+    contract_size: float = Field(default=100000, gt=0)
+    leverage: float = Field(default=30, gt=0)
+    # Kept for older programmatic clients; new UI requests send lots.
     position_size: float = Field(default=1, gt=0)
     commission_per_unit: float = Field(default=0, ge=0)
     commission_rate: float = Field(default=0, ge=0)
@@ -346,7 +350,10 @@ def robustness(request: RobustnessRequest, db: Session = Depends(get_db)):
             commission_rate=base.commission_rate * scenario.commission_multiplier,
             spread_scale=base.spread_scale * scenario.spread_multiplier,
             slippage=base.slippage * scenario.slippage_multiplier + scenario.slippage_addition)
-        config = replace(config, position_size=base.position_size * scenario.position_size_multiplier)
+        if base.lots is not None:
+            config = replace(config, lots=base.lots * scenario.position_size_multiplier)
+        else:
+            config = replace(config, position_size=base.position_size * scenario.position_size_multiplier)
         return research.run_batch((changed,), strategy_factory=factory, config=config,
                                   analysis_settings=definition.analysis_config,
                                   search_method=f"robustness:{scenario.name}",

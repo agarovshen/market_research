@@ -24,6 +24,9 @@ class BacktestRunConfig:
     spread_scale: float = 0.00001
     slippage: float = 0.0
     final_liquidation: bool = True
+    lots: float | None = None
+    contract_size: float = 100_000.0
+    leverage: float = 30.0
 
     def __post_init__(self) -> None:
         symbol = self.symbol.strip().upper()
@@ -47,7 +50,9 @@ class BacktestRunConfig:
             spread_scale=self.spread_scale,
             slippage=self.slippage,
         )
-        BacktestSettings(initial_cash=self.initial_cash, position_size=self.position_size)
+        BacktestSettings(initial_cash=self.initial_cash, position_size=self.position_size,
+                         lots=self.lots, contract_size=self.contract_size,
+                         leverage=self.leverage)
 
 
 class BacktestRunner:
@@ -70,6 +75,9 @@ class BacktestRunner:
         settings = BacktestSettings(
             initial_cash=config.initial_cash,
             position_size=config.position_size,
+            lots=config.lots,
+            contract_size=config.contract_size,
+            leverage=config.leverage,
             costs=ExecutionCosts(
                 commission_per_unit=config.commission_per_unit,
                 commission_rate=config.commission_rate,

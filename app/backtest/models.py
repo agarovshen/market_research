@@ -102,7 +102,10 @@ class ExecutionEvent:
 
 @dataclass(frozen=True, slots=True)
 class Signal:
-    """A strategy instruction. Opens can specify long/short; closes use no side."""
+    """A strategy instruction; explicit quantity is internal units, not lots.
+
+    In Forex runs, omitting quantity uses the run's ``lots * contract_size``.
+    """
 
     action: OrderAction
     side: Side | None = None
@@ -153,6 +156,12 @@ class Order:
     status: OrderStatus = OrderStatus.FILLED
     trigger_price: float | None = None
     stop_loss: float | None = None
+    lots: float | None = None
+    contract_size: float = 100_000.0
+    leverage: float = 30.0
+    notional: float | None = None
+    margin: float | None = None
+    units: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -163,6 +172,12 @@ class Position:
     entry_price: float
     entry_commission: float
     stop_loss: float | None = None
+    lots: float | None = None
+    contract_size: float = 100_000.0
+    leverage: float = 30.0
+    notional: float | None = None
+    margin: float | None = None
+    units: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -178,14 +193,25 @@ class Trade:
     exit_commission: float
     gross_pnl: float
     net_pnl: float
+    lots: float | None = None
+    contract_size: float = 100_000.0
+    leverage: float = 30.0
+    notional: float | None = None
+    margin: float | None = None
+    units: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class EquityPoint:
+    """End-of-bar account state; ``cash`` is legacy cash, ``balance`` is Forex balance."""
     timestamp: datetime
     cash: float
     unrealized_pnl: float
     equity: float
+    margin_used: float | None = None
+    free_margin: float | None = None
+    margin_level: float | None = None
+    balance: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -203,6 +229,7 @@ class ExecutionCosts:
 
 @dataclass(frozen=True, slots=True)
 class BacktestResult:
+    """Canonical simulation output, including nullable Forex account fields."""
     initial_cash: float
     final_cash: float
     final_equity: float
@@ -216,6 +243,14 @@ class BacktestResult:
     trades: tuple[Trade, ...]
     equity_curve: tuple[EquityPoint, ...]
     execution_trace: tuple[ExecutionEvent, ...] = ()
+    balance: float | None = None
+    margin_used: float | None = None
+    free_margin: float | None = None
+    margin_level: float | None = None
+    lots: float | None = None
+    contract_size: float = 100_000.0
+    leverage: float = 30.0
+    units: float | None = None
 
     def format_execution_trace(self) -> str:
         """Return the ordered event stream in a stable, developer-readable form."""

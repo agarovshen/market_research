@@ -228,12 +228,20 @@ class AnalysisEngine:
             result.initial_cash, result.final_cash, result.final_equity,
             result.realized_pnl, result.unrealized_pnl,
             result.total_commission, result.total_spread_cost, result.total_slippage_cost,
+            result.balance if result.balance is not None else result.final_cash,
+            result.margin_used if result.margin_used is not None else 0.0,
+            result.free_margin if result.free_margin is not None else 0.0,
         )
-        if not all(isfinite(value) for value in values):
+        if (not all(isfinite(value) for value in values)
+                or (result.margin_level is not None and not isfinite(result.margin_level))):
             raise ValueError("BacktestResult accounting values must be finite")
         previous = None
         for point in result.equity_curve:
-            if not isfinite(point.equity) or not isfinite(point.cash) or not isfinite(point.unrealized_pnl):
+            point_values = (point.equity, point.cash, point.unrealized_pnl,
+                            point.margin_used if point.margin_used is not None else 0.0,
+                            point.free_margin if point.free_margin is not None else 0.0)
+            if (not all(isfinite(value) for value in point_values)
+                    or (point.margin_level is not None and not isfinite(point.margin_level))):
                 raise ValueError("Equity points must contain finite values")
             if previous is not None:
                 try:

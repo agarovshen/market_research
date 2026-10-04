@@ -13,15 +13,30 @@ from app.backtest.strategy import BarHistory, Strategy, StrategyContext
 @dataclass(frozen=True, slots=True)
 class BacktestSettings:
     initial_cash: float = 100_000.0
+    # Legacy internal quantity is retained for direct engine callers. Public
+    # Forex runs set lots and convert them to base-currency units.
     position_size: float = 1.0
     costs: ExecutionCosts = ExecutionCosts()
     close_at_end: bool = True
+    lots: float | None = None
+    contract_size: float = 100_000.0
+    leverage: float = 30.0
 
     def __post_init__(self) -> None:
         if not isfinite(self.initial_cash) or self.initial_cash <= 0:
             raise ValueError("initial_cash must be finite and positive")
         if not isfinite(self.position_size) or self.position_size <= 0:
             raise ValueError("position_size must be finite and positive")
+        if self.lots is not None and (not isfinite(self.lots) or self.lots <= 0):
+            raise ValueError("lots must be finite and positive")
+        if not isfinite(self.contract_size) or self.contract_size <= 0:
+            raise ValueError("contract_size must be finite and positive")
+        if not isfinite(self.leverage) or self.leverage <= 0:
+            raise ValueError("leverage must be finite and positive")
+
+    @property
+    def default_units(self) -> float:
+        return self.lots * self.contract_size if self.lots is not None else self.position_size
 
 
 class BacktestEngine:
@@ -39,6 +54,7 @@ class BacktestEngine:
         data = tuple(bars)
         self._validate_bars(data)
         cash = self.settings.initial_cash
+        balance = self.settings.initial_cash
         position: Position | None = None
         orders: list[Order] = []
         trades: list[Trade] = []
@@ -58,7 +74,7 @@ class BacktestEngine:
                  reference: float, *, order_type: OrderType = OrderType.MARKET,
                  trigger_price: float | None = None, stop_loss: float | None = None,
                  replace_sequence: int | None = None) -> Order:
-            nonlocal cash, commissions, spread_costs, slippage_costs
+            nonlocal cash, balance, commissions, spread_costs, slippage_costs
             half_spread = bar.spread * self.settings.costs.spread_scale / 2
             direction = 1 if side is Side.LONG else -1
             # Opening pays adverse spread/slippage; closing takes the opposite position in the market.
@@ -67,15 +83,30 @@ class BacktestEngine:
             commission = qty * (self.settings.costs.commission_per_unit + abs(price) * self.settings.costs.commission_rate)
             spread = half_spread * qty
             slip = self.settings.costs.slippage * qty
-            cash_delta = -direction * qty * price if action is OrderAction.OPEN else direction * qty * price
-            cash += cash_delta - commission
+            if self.settings.lots is not None:
+                # Forex balance is realized account funds. Opening a position
+                # reserves margin; it does not debit its full notional.
+                if action is OrderAction.OPEN:
+                    balance -= commission
+            else:
+                cash_delta = (-direction * qty * price if action is OrderAction.OPEN
+                              else direction * qty * price)
+                cash += cash_delta - commission
+                balance = cash
             commissions += commission
             spread_costs += spread
             slippage_costs += slip
             sequence = replace_sequence if replace_sequence is not None else len(orders) + 1
+            actual_lots = (qty / self.settings.contract_size
+                           if self.settings.lots is not None else None)
+            notional = (qty * price if action is OrderAction.OPEN
+                        and self.settings.lots is not None else None)
+            margin = notional / self.settings.leverage if notional is not None else None
             order = Order(sequence, signal_time, bar.timestamp, action, side,
                           qty, reference, price, commission, spread, slip,
-                          order_type, OrderStatus.FILLED, trigger_price, stop_loss)
+                          order_type, OrderStatus.FILLED, trigger_price, stop_loss,
+                          actual_lots, self.settings.contract_size, self.settings.leverage,
+                          notional, margin, qty)
             if replace_sequence is None:
                 orders.append(order)
             else:
@@ -84,14 +115,22 @@ class BacktestEngine:
 
         def record_closed_trade(prior: Position, order: Order, index: int,
                                 reason: str, trade_id: int) -> Trade:
-            nonlocal realized
+            nonlocal realized, balance
             direction = 1 if prior.side is Side.LONG else -1
             gross = (order.fill_price - prior.entry_price) * prior.quantity * direction
             net = gross - prior.entry_commission - order.commission
             realized += net
+            if self.settings.lots is not None:
+                # The entry commission was debited at opening; realize market
+                # movement and exit commission at close.
+                balance += gross - order.commission
+            else:
+                balance = cash
             trade = Trade(trade_id, prior.side, prior.quantity, prior.entry_time,
                           order.filled_at, prior.entry_price, order.fill_price,
-                          prior.entry_commission, order.commission, gross, net)
+                          prior.entry_commission, order.commission, gross, net,
+                          prior.lots, prior.contract_size, prior.leverage,
+                          prior.notional, prior.margin, prior.quantity)
             record(ExecutionEventType.POSITION_CLOSED, order.filled_at, index,
                    action=OrderAction.CLOSE, side=prior.side, order_id=order.sequence,
                    order_type=order.order_type, trade_id=trade.sequence,
@@ -147,6 +186,35 @@ class BacktestEngine:
             record_closed_trade(prior, order, index, reason, trade_id)
             position = None
 
+        def units_for(signal: Signal) -> float:
+            return signal.quantity if signal.quantity is not None else self.settings.default_units
+
+        def position_for(order: Order, timestamp) -> Position:
+            return Position(order.side, order.quantity, timestamp, order.fill_price,
+                            order.commission, order.stop_loss, order.lots,
+                            order.contract_size, order.leverage,
+                            order.notional, order.margin, order.quantity)
+
+        def ensure_margin(qty: float, side: Side, bar: Bar, reference: float) -> None:
+            if self.settings.lots is None:
+                return
+            direction = 1 if side is Side.LONG else -1
+            signed_cost = direction
+            price = reference + signed_cost * (
+                bar.spread * self.settings.costs.spread_scale / 2 + self.settings.costs.slippage
+            )
+            if price <= 0:
+                raise ValueError("Forex execution price must be positive")
+            notional = qty * price
+            required = notional / self.settings.leverage
+            commission = qty * (self.settings.costs.commission_per_unit
+                                + abs(price) * self.settings.costs.commission_rate)
+            available = balance - commission
+            if required > available:
+                raise ValueError(
+                    f"Insufficient free margin: required {required:g}, available {available:g}"
+                )
+
         for i, bar in enumerate(data):
             position_at_bar_start = position
             record(ExecutionEventType.BAR, bar.timestamp, i,
@@ -158,9 +226,10 @@ class BacktestEngine:
                 if signal.action is OrderAction.OPEN:
                     if position is None:
                         side = signal.side
-                        qty = signal.quantity if signal.quantity is not None else self.settings.position_size
+                        qty = units_for(signal)
                         if side is None or not isfinite(qty) or qty <= 0:
                             raise ValueError("Open signals require a side and positive finite quantity")
+                        ensure_margin(qty, side, bar, bar.open)
                         order = fill(OrderAction.OPEN, side, qty, created_bar.timestamp, bar, bar.open,
                                      stop_loss=signal.stop_loss)
                         record(ExecutionEventType.EXECUTION, bar.timestamp, i,
@@ -172,13 +241,15 @@ class BacktestEngine:
                                         ("commission", order.commission),
                                         ("spread_cost", order.spread_cost),
                                         ("slippage_cost", order.slippage_cost)))
-                        position = Position(side, qty, bar.timestamp, order.fill_price, order.commission,
-                                            signal.stop_loss)
+                        position = position_for(order, bar.timestamp)
                         record(ExecutionEventType.POSITION_OPENED, bar.timestamp, i,
                                action=OrderAction.OPEN, side=position.side,
                                order_id=order.sequence, order_type=order.order_type, trade_id=trade_id,
                                price=position.entry_price, quantity=position.quantity,
-                               stop_loss=position.stop_loss)
+                               stop_loss=position.stop_loss,
+                               details=(("lots", position.lots), ("units", position.quantity),
+                                        ("notional", position.notional), ("margin", position.margin),
+                                        ("leverage", position.leverage)))
                 elif position is not None:
                     prior = position
                     order = fill(OrderAction.CLOSE, prior.side, prior.quantity, created_bar.timestamp, bar, bar.open)
@@ -218,7 +289,8 @@ class BacktestEngine:
                             reference = bar.open if bar.open >= trigger else trigger
                         else:
                             reference = bar.open if bar.open <= trigger else trigger
-                        qty = stop_signal.quantity if stop_signal.quantity is not None else self.settings.position_size
+                        qty = units_for(stop_signal)
+                        ensure_margin(qty, stop_signal.side, bar, reference)
                         trade_id = len(trades) + 1
                         order = fill(OrderAction.OPEN, stop_signal.side, qty,
                                      created_bar.timestamp, bar, reference,
@@ -242,13 +314,15 @@ class BacktestEngine:
                                         ("commission", order.commission),
                                         ("spread_cost", order.spread_cost),
                                         ("slippage_cost", order.slippage_cost)))
-                        position = Position(order.side, qty, bar.timestamp, order.fill_price,
-                                            order.commission, order.stop_loss)
+                        position = position_for(order, bar.timestamp)
                         record(ExecutionEventType.POSITION_OPENED, bar.timestamp, i,
                                action=OrderAction.OPEN, side=position.side,
                                order_id=order.sequence, order_type=order.order_type,
                                trade_id=trade_id, price=position.entry_price,
-                               quantity=position.quantity, stop_loss=position.stop_loss)
+                               quantity=position.quantity, stop_loss=position.stop_loss,
+                               details=(("lots", position.lots), ("units", position.quantity),
+                                        ("notional", position.notional), ("margin", position.margin),
+                                        ("leverage", position.leverage)))
                         pending_stop = None
 
             pending_order = orders[pending_stop[3] - 1] if pending_stop is not None else None
@@ -284,7 +358,7 @@ class BacktestEngine:
                            stop_loss=signal.stop_loss,
                            details=(("strategy_reason", "not exposed by Signal"),))
                     if executable:
-                        qty = signal.quantity if signal.quantity is not None else self.settings.position_size
+                        qty = units_for(signal)
                         if not isfinite(qty) or qty <= 0:
                             raise ValueError("Open signals require a side and positive finite quantity")
                         trade_id = len(trades) + 1
@@ -292,20 +366,42 @@ class BacktestEngine:
                         order = Order(order_id, bar.timestamp, None, OrderAction.OPEN,
                                       signal.side, qty, signal.trigger_price, None,
                                       0.0, 0.0, 0.0, OrderType.STOP, OrderStatus.PENDING,
-                                      signal.trigger_price, signal.stop_loss)
+                                      signal.trigger_price, signal.stop_loss,
+                                      (qty / self.settings.contract_size
+                                       if self.settings.lots is not None else None),
+                                      self.settings.contract_size, self.settings.leverage,
+                                      (qty * signal.trigger_price
+                                       if self.settings.lots is not None else None),
+                                      (qty * signal.trigger_price / self.settings.leverage
+                                       if self.settings.lots is not None else None),
+                                      qty)
                         orders.append(order)
                         record(ExecutionEventType.ORDER_CREATED, bar.timestamp, i,
                                action=OrderAction.OPEN, side=signal.side,
                                order_id=order_id, order_type=OrderType.STOP,
                                trade_id=trade_id, quantity=qty,
                                trigger_price=signal.trigger_price,
-                               stop_loss=signal.stop_loss, reason="stop_entry_pending")
+                               stop_loss=signal.stop_loss, reason="stop_entry_pending",
+                               details=(("lots", qty / self.settings.contract_size
+                                         if self.settings.lots is not None else None),
+                                        ("units", qty),
+                                        ("contract_size", self.settings.contract_size),
+                                        ("leverage", self.settings.leverage),
+                                        ("notional", qty * signal.trigger_price
+                                         if self.settings.lots is not None else None),
+                                        ("margin", qty * signal.trigger_price / self.settings.leverage
+                                         if self.settings.lots is not None else None)))
                         record(ExecutionEventType.ORDER_PENDING, bar.timestamp, i,
                                action=OrderAction.OPEN, side=signal.side,
                                order_id=order_id, order_type=OrderType.STOP,
                                trade_id=trade_id, quantity=qty,
                                trigger_price=signal.trigger_price,
-                               stop_loss=signal.stop_loss, reason="eligible_next_bar")
+                               stop_loss=signal.stop_loss, reason="eligible_next_bar",
+                               details=(("lots", qty / self.settings.contract_size
+                                         if self.settings.lots is not None else None),
+                                        ("units", qty),
+                                        ("contract_size", self.settings.contract_size),
+                                        ("leverage", self.settings.leverage)))
                         pending_stop = (signal, bar, i, order_id)
                 elif signal is not None:
                     if signal.action is OrderAction.OPEN and pending_stop is not None:
@@ -322,13 +418,17 @@ class BacktestEngine:
                     if executable:
                         order_id = len(orders) + 1
                         order_side = signal.side if signal.action is OrderAction.OPEN else position.side
-                        order_quantity = (signal.quantity if signal.quantity is not None
-                                          else self.settings.position_size) if signal.action is OrderAction.OPEN else position.quantity
+                        order_quantity = units_for(signal) if signal.action is OrderAction.OPEN else position.quantity
                         record(ExecutionEventType.ORDER_CREATED, bar.timestamp, i,
                                action=signal.action, side=order_side, order_id=order_id,
                                order_type=OrderType.MARKET,
                                trade_id=trade_id, quantity=order_quantity,
-                               reason="market_signal_next_bar_open")
+                               reason="market_signal_next_bar_open",
+                               details=(("lots", order_quantity / self.settings.contract_size
+                                         if self.settings.lots is not None else None),
+                                        ("units", order_quantity),
+                                        ("contract_size", self.settings.contract_size),
+                                        ("leverage", self.settings.leverage)))
                         pending = (signal, bar, trade_id)
                     else:
                         pending = (signal, bar, None)
@@ -337,7 +437,18 @@ class BacktestEngine:
             marked_value = 0.0 if position is None else direction * position.quantity * (
                 bar.close - direction * bar.spread * self.settings.costs.spread_scale / 2
             )
-            curve.append(EquityPoint(bar.timestamp, cash, unrealized, cash + marked_value))
+            margin_used = (position.quantity * bar.close / self.settings.leverage
+                           if position is not None and self.settings.lots is not None
+                           else 0.0 if self.settings.lots is not None else None)
+            account_balance = balance if self.settings.lots is not None else cash
+            account_equity = (account_balance + unrealized if self.settings.lots is not None
+                              else cash + marked_value)
+            free_margin = account_equity - margin_used if margin_used is not None else None
+            margin_level = (account_equity / margin_used * 100
+                            if margin_used is not None and margin_used > 0 else None)
+            curve.append(EquityPoint(bar.timestamp, account_balance, unrealized,
+                                     account_equity, margin_used, free_margin, margin_level,
+                                     account_balance if self.settings.lots is not None else None))
 
         if position is not None and self.settings.close_at_end and data:
             prior = position
@@ -359,18 +470,36 @@ class BacktestEngine:
             record_closed_trade(prior, order, len(data) - 1,
                                 "end_of_data_liquidation", trade_id)
             position = None
-            curve[-1] = EquityPoint(last.timestamp, cash, 0.0, cash)
+            final_balance = balance if self.settings.lots is not None else cash
+            curve[-1] = EquityPoint(last.timestamp, final_balance, 0.0, final_balance,
+                                    0.0 if self.settings.lots is not None else None,
+                                    final_balance if self.settings.lots is not None else None,
+                                    None, final_balance if self.settings.lots is not None else None)
 
         unrealized = 0.0 if position is None or not data else self._unrealized(position, data[-1].close, data[-1].spread)
         if position is None or not data:
-            final_equity = cash
+            final_equity = balance if self.settings.lots is not None else cash
+            final_balance = balance if self.settings.lots is not None else cash
+            final_margin = 0.0 if self.settings.lots is not None else None
         else:
             direction = 1 if position.side is Side.LONG else -1
             liquidation = data[-1].close - direction * data[-1].spread * self.settings.costs.spread_scale / 2
-            final_equity = cash + direction * position.quantity * liquidation
-        return BacktestResult(self.settings.initial_cash, cash, final_equity, realized,
+            final_balance = balance if self.settings.lots is not None else cash
+            final_equity = (final_balance + unrealized if self.settings.lots is not None
+                            else cash + direction * position.quantity * liquidation)
+            final_margin = (position.quantity * data[-1].close / self.settings.leverage
+                            if self.settings.lots is not None else None)
+        final_free_margin = (final_equity - final_margin if final_margin is not None else None)
+        final_margin_level = (final_equity / final_margin * 100
+                              if final_margin is not None and final_margin > 0 else None)
+        return BacktestResult(self.settings.initial_cash,
+            final_balance if self.settings.lots is not None else cash, final_equity, realized,
             unrealized, commissions, spread_costs, slippage_costs,
-            position, tuple(orders), tuple(trades), tuple(curve), tuple(events))
+            position, tuple(orders), tuple(trades), tuple(curve), tuple(events),
+            final_balance if self.settings.lots is not None else None,
+            final_margin, final_free_margin, final_margin_level,
+            self.settings.lots, self.settings.contract_size, self.settings.leverage,
+            position.quantity if position is not None else None)
 
     def _unrealized(self, position: Position | None, close: float, spread: float) -> float:
         if position is None:

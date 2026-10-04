@@ -118,7 +118,7 @@
       ["Instrument / timeframe",`${definition.symbol} · ${definition.timeframe}`],
       ["Test period",`${period.start||"—"} → ${period.end||"—"}`],
       ["Parameters",JSON.stringify(Object.fromEntries(definition.parameters?.values||[]))],
-      ["Execution assumptions",`capital ${config.initial_cash??"—"} · quantity ${config.position_size??"—"} · commission ${config.commission_per_unit??"—"}/${config.commission_rate??"—"} · spread ${config.spread_scale??"—"} · slippage ${config.slippage??"—"}`],
+      ["Execution assumptions",`capital ${config.initial_cash??"—"} · ${config.lots!=null?`${config.lots} lots · ${config.contract_size??100000} units/lot · 1:${config.leverage??30}`:`${config.position_size??"—"} legacy units`} · commission ${config.commission_per_unit??"—"}/${config.commission_rate??"—"} · spread ${config.spread_scale??"—"} · slippage ${config.slippage??"—"}`],
     ];
     const target=$("source-context");target.replaceChildren(...values.flatMap(([label,value])=>{
       const term=document.createElement("dt"),description=document.createElement("dd");term.textContent=label;description.textContent=value;return [term,description];
@@ -158,7 +158,9 @@
     const config=definition.backtest_config||{},analysis=definition.analysis_config||{},period=definition.period||{};
     const body={mode:mode,strategy_id:definition.strategy_id,symbol:definition.symbol,timeframe:definition.timeframe,
       start:period.start,end:period.end,
-      initial_cash:config.initial_cash,position_size:config.position_size,commission_per_unit:config.commission_per_unit,
+      initial_cash:config.initial_cash,position_size:config.position_size,
+      lots:config.lots,contract_size:config.contract_size,leverage:config.leverage,
+      commission_per_unit:config.commission_per_unit,
       commission_rate:config.commission_rate,spread_scale:config.spread_scale,slippage:config.slippage,
       risk_free_rate:analysis.risk_free_rate,target_return:analysis.target_return};
     if(analysis.periods_per_year!=null)body.periods_per_year=analysis.periods_per_year;

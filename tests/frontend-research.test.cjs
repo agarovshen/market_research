@@ -127,7 +127,7 @@ test("trade history preserves canonical fields and exact chart marker coordinate
     const backtest = { trades: [
         { sequence: 7, side: "long", quantity: 2, entry_time: rows[0].timestamp, exit_time: rows[0].timestamp,
             entry_price: 10.25, exit_price: 10.5, gross_pnl: 0.5, net_pnl: 0.4,
-            entry_commission: 0.05, exit_commission: 0.05 },
+            entry_commission: 0.05, exit_commission: 0.05, units: 1000, lots: 0.01 },
         { sequence: 8, side: "short", entry_time: rows[2].timestamp, exit_time: rows[3].timestamp,
             entry_price: 11, exit_price: 12, gross_pnl: -1, net_pnl: -1 },
     ] };
@@ -141,6 +141,8 @@ test("trade history preserves canonical fields and exact chart marker coordinate
     assert.equal(trades[0].net_pnl, 0.4);
     assert.equal(trades[0].entry_commission, 0.05);
     assert.equal(trades[0].exit_commission, 0.05);
+    assert.equal(trades[0].units, 1000);
+    assert.equal(trades[0].lots, 0.01);
     assert.equal(trades[0].duration_ms, undefined);
     assert.equal(trades[1].side, "SELL · SHORT");
     assert.equal(trades[1].quantity, null);
@@ -192,6 +194,14 @@ test("main and research pages keep single-test and research-analysis responsibil
     assert.match(runner, /ResearchResultSections\.renderTradeHistory/);
     assert.match(runner, /ResearchResultSections\.renderExecutionLog/);
     assert.match(runner, /TradeHistory\.chartHandoff/);
+    assert.match(main, /name="lots"[^>]+value="0\.01"/);
+    assert.match(main, /name="leverage"[^>]+value="30"/);
+    assert.match(main, /name="contract_size"[^>]+value="100000"/);
+    assert.equal(main.includes('name="position_size"'), false);
+    assert.match(runner, /lots: Number\(fields\.get\("lots"\)\)/);
+    assert.match(runner, /leverage: Number\(fields\.get\("leverage"\)\)/);
+    assert.match(runner, /contract_size: Number\(fields\.get\("contract_size"\)\)/);
+    assert.match(runner, /\["Margin used", displayValue\(row\.backtest_result\?\.margin_used\)\]/);
     assert.match(app, /research:focus-trade/);
     assert.doesNotMatch(research, /Trade History|Order &amp; Strategy Log|trade-records|execution-log-records/);
     assert.match(research, /Training → OOS selection/);
@@ -210,6 +220,7 @@ test("main and research pages keep single-test and research-analysis responsibil
     assert.match(runner, /BroadcastChannel\("market-research-latest-test"\)/);
     assert.match(workspace, /strategy_id:definition\.strategy_id/);
     assert.match(workspace, /initial_cash:config\.initial_cash/);
+    assert.match(workspace, /lots:config\.lots,contract_size:config\.contract_size,leverage:config\.leverage/);
     assert.match(research, /Walk-forward/);
     assert.match(research, /advanced-tools/);
     assert.match(research, /Experiment records/);

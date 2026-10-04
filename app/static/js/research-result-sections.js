@@ -36,7 +36,9 @@
             tr.dataset.tradeId = String(trade.id);
             const values = [trade.id, trade.side, new Date(trade.entry_time).toLocaleString(),
                 new Date(trade.exit_time).toLocaleString(), format(trade.entry_price), format(trade.exit_price),
-                format(trade.quantity), format(trade.gross_pnl), format(trade.net_pnl),
+                trade.lots == null ? `${format(trade.units)} units`
+                    : `${format(trade.lots)} lots · ${format(trade.units)} units`,
+                format(trade.gross_pnl), format(trade.net_pnl),
                 `${format(trade.entry_commission)} / ${format(trade.exit_commission)}`];
             for (const value of values) {
                 const td = document.createElement("td");

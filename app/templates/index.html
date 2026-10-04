@@ -56,7 +56,9 @@
                 </fieldset>
                 <fieldset><legend>Execution assumptions</legend>
                     <label>Initial capital<input name="initial_cash" type="number" min="0.01" step="any" value="100000" required></label>
-                    <label>Quantity<input name="position_size" type="number" min="0.000001" step="any" value="1" required></label>
+                    <label>Lots<input name="lots" type="number" min="0.000001" step="any" value="0.01" required></label>
+                    <label>Leverage<input name="leverage" type="number" min="0.000001" step="any" value="30" required></label>
+                    <label>Contract size · units per lot<input name="contract_size" type="number" min="0.000001" step="any" value="100000" required></label>
                     <label>Commission / unit<input name="commission_per_unit" type="number" min="0" step="any" value="0" required></label>
                     <label>Commission rate<input name="commission_rate" type="number" min="0" step="any" value="0" required></label>
                     <label>Spread scale · price units per feed point<input name="spread_scale" type="number" min="0" step="any" value="0.00001" required></label>
@@ -147,7 +149,7 @@
         <section class="trade-history" aria-labelledby="trade-history-title">
             <div class="test-heading"><div><h2 id="trade-history-title">Trade History</h2><p id="trade-result-context">No test result selected.</p></div><button id="inspect-trades" type="button" disabled>View on price chart</button></div>
             <p id="trade-empty">No completed trades.</p>
-            <div class="test-table"><table><thead><tr><th>#</th><th>Side</th><th>Entry time</th><th>Exit time</th><th>Entry</th><th>Exit</th><th>Quantity</th><th>Gross P&amp;L</th><th>Net P&amp;L</th><th>Entry / exit commission</th><th>Chart</th></tr></thead><tbody id="trade-records"></tbody></table></div>
+            <div class="test-table"><table><thead><tr><th>#</th><th>Side</th><th>Entry time</th><th>Exit time</th><th>Entry</th><th>Exit</th><th>Lots / units</th><th>Gross P&amp;L</th><th>Net P&amp;L</th><th>Entry / exit commission</th><th>Chart</th></tr></thead><tbody id="trade-records"></tbody></table></div>
         </section>
 
         <section class="execution-log" aria-labelledby="execution-log-title">
