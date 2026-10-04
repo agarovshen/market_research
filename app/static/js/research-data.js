@@ -197,6 +197,29 @@
         return Number.isFinite(number) ? number : null;
     }
 
+    function formatNumber(value) {
+        const number = finiteOrNull(value);
+        if (number === null) return "—";
+        if (number === 0) return "0";
+        return new Intl.NumberFormat(undefined, { maximumFractionDigits: 12 }).format(number);
+    }
+
+    function formatPercent(value) {
+        const number = finiteOrNull(value);
+        if (number === null) return "—";
+        if (number === 0) return "0%";
+        return `${new Intl.NumberFormat(undefined, { maximumFractionDigits: 12 }).format(number * 100)}%`;
+    }
+
+    function equityChartPoints(analysis) {
+        if (!Array.isArray(analysis?.equity_curve)) return [];
+        return analysis.equity_curve.flatMap(point => {
+            const x = timestamp(point.timestamp);
+            const y = finiteOrNull(point.equity);
+            return x === null || y === null ? [] : [{ x, y }];
+        });
+    }
+
     function maximumDrawdown(drawdownPoints) {
         const valid = drawdownPoints.filter(point => Number.isFinite(point.y));
         if (!valid.length) return null;
@@ -206,5 +229,6 @@
     return {
         TIMEFRAMES, ChartState, timestamp, nearestIndex, centeredSlice,
         marketDataParams, transformBacktest, maximumDrawdown,
+        formatNumber, formatPercent, equityChartPoints,
     };
 });

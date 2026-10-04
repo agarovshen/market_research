@@ -3,7 +3,8 @@
   const $ = id => document.getElementById(id);
   const form = $("research-form"), state = { ids: [], sensitivityIds: [], sensitivityParameters: [], correlationIds: [], baselineId: null, monteCarloId: null, chart: null, advancedChart: null, researchBusy: false, advancedBusy: false, results: [], selectedExperimentId: null, latestTest: null };
   let strategySchema = [];
-  const fmt = value => value == null ? "—" : new Intl.NumberFormat(undefined,{maximumFractionDigits:4}).format(value);
+  const fmt = ResearchData.formatNumber;
+  const fmtPercent = ResearchData.formatPercent;
   async function request(path, body) {
     const response = await fetch("/api/research" + path, body ? {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)} : {});
     const data = await response.json();
@@ -181,24 +182,25 @@
     return [];
   }
   function renderChart(analysis) {
-    const points=(analysis?.equity_curve||[]).map(item=>({x:new Date(item.timestamp),y:item.equity}));
+    const points=ResearchData.equityChartPoints(analysis);
     $("chart-empty").hidden=points.length>0;
     if(state.chart)state.chart.destroy();
     state.chart=new Chart($("equity-chart"),{type:"line",data:{datasets:[{label:"Equity",data:points,borderColor:"#58bad1",backgroundColor:"#58bad122",pointRadius:0,borderWidth:1.5,fill:true}]},
-      options:{responsive:true,maintainAspectRatio:false,animation:false,parsing:false,plugins:{legend:{display:false}},
+      options:{responsive:true,maintainAspectRatio:false,animation:false,parsing:false,plugins:{legend:{display:false},
+        tooltip:{callbacks:{label:context=>`Equity: ${fmt(context.parsed.y)}`}}},
         scales:{x:{type:"time",time:{unit:"day"},ticks:{color:"#748798",maxTicksLimit:8},grid:{color:"#24313b"}},
-          y:{ticks:{color:"#748798"},grid:{color:"#24313b"}}}}});
+          y:{ticks:{color:"#748798",callback:value=>fmt(value)},grid:{color:"#24313b"}}}}});
   }
   function selectExperiment(id) {
     state.selectedExperimentId=id;
     const row=state.results.find(item=>item.status==="completed"&&item.definition?.experiment_id===id)||null;
     for(const tr of $("records").rows)tr.classList.toggle("selected-result",tr.dataset.experimentId===id);
     const analysis=row?.analysis_result;
-    const metrics={"Selected total return":analysis?.total_return==null?"—":`${(analysis.total_return*100).toFixed(2)}%`,
+    const metrics={"Selected total return":fmtPercent(analysis?.total_return),
       "Net trade P&L":fmt(analysis?.trades?.net_profit),"Trades":analysis?.trades?.total_trades??"—",
       "Win rate":analysis?.trades?.win_rate==null?"—":`${(analysis.trades.win_rate*100).toFixed(2)}%`,
       "Profit factor":fmt(analysis?.trades?.profit_factor),"Expectancy":fmt(analysis?.trades?.expectancy),
-      "Max drawdown":analysis?.drawdown?.max_drawdown_pct==null?"—":`${(analysis.drawdown.max_drawdown_pct*100).toFixed(2)}%`,
+      "Max drawdown":fmtPercent(analysis?.drawdown?.max_drawdown_pct),
       "Period volatility":fmt(analysis?.risk?.period_volatility),"Sharpe":fmt(analysis?.risk?.sharpe_ratio),
       "Sortino":fmt(analysis?.risk?.sortino_ratio),"Calmar":fmt(analysis?.risk?.calmar_ratio)};
     for(const card of $("summary").querySelectorAll(".metric")){const label=card.querySelector("small").textContent;if(label in metrics)card.querySelector("b").textContent=metrics[label];}
@@ -244,11 +246,11 @@
     const cards=[["Experiments",rows.length],["Completed",completed],["Failed",failed],
       ["OOS evaluated",rows.filter(row=>row.definition.phase==="oos"&&row.status==="completed").length],
       ["Selection metric",result.selection_rule?.metric||"—"],["Selected",result.selected?.length??"—"],
-      ["Selected total return",analysis?.total_return==null?"—":(analysis.total_return*100).toFixed(2)+"%"],
+      ["Selected total return",fmtPercent(analysis?.total_return)],
       ["Net trade P&L",fmt(analysis?.trades?.net_profit)],["Trades",analysis?.trades?.total_trades??"—"],
       ["Win rate",analysis?.trades?.win_rate==null?"—":(analysis.trades.win_rate*100).toFixed(2)+"%"],
       ["Profit factor",fmt(analysis?.trades?.profit_factor)],["Expectancy",fmt(analysis?.trades?.expectancy)],
-      ["Max drawdown",analysis?.drawdown?.max_drawdown_pct==null?"—":(analysis.drawdown.max_drawdown_pct*100).toFixed(2)+"%"],
+      ["Max drawdown",fmtPercent(analysis?.drawdown?.max_drawdown_pct)],
       ["Period volatility",fmt(analysis?.risk?.period_volatility)],["Sharpe",fmt(analysis?.risk?.sharpe_ratio)],
       ["Sortino",fmt(analysis?.risk?.sortino_ratio)],["Calmar",fmt(analysis?.risk?.calmar_ratio)],
       ...(result.aggregate?[["WF summed OOS net P&L",fmt(result.aggregate.total_net_profit)],
@@ -256,7 +258,7 @@
     summary.replaceChildren(...cards.map(pair=>{const box=document.createElement("div");box.className="metric";const small=document.createElement("small");small.textContent=pair[0];const value=document.createElement("b");value.textContent=pair[1];box.append(small,value);return box;}));
     const tbody=$("records");
     tbody.replaceChildren(...rows.map(row=>{const d=row.definition,a=row.analysis_result,tr=document.createElement("tr");tr.dataset.phase=d.phase;tr.dataset.experimentId=d.experiment_id;tr.tabIndex=row.status==="completed"?0:-1;
-      const data=[d.phase.toUpperCase(),row.status,JSON.stringify(Object.fromEntries(d.parameters.values)),fmt(a?.total_return),fmt(a?.trades?.net_profit),fmt(a?.trades?.total_trades),d.experiment_id.slice(0,12),row.failure?(row.failure.exception_type+": "+row.failure.message):"—"];
+      const data=[d.phase.toUpperCase(),row.status,JSON.stringify(Object.fromEntries(d.parameters.values)),fmtPercent(a?.total_return),fmt(a?.trades?.net_profit),fmt(a?.trades?.total_trades),d.experiment_id.slice(0,12),row.failure?(row.failure.exception_type+": "+row.failure.message):"—"];
       for(const value of data){const cell=document.createElement("td");cell.textContent=value;tr.append(cell);}
       if(row.status==="failed")tr.title=(row.failure?.exception_type||"Failure")+": "+(row.failure?.message||"");
       if(row.status==="completed"){

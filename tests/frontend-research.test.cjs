@@ -373,3 +373,29 @@ test("drawdown stays absent when the result does not supply drawdown values", ()
     assert.equal(result.equity[0].drawdown, null);
     assert.equal(Research.maximumDrawdown([]), null);
 });
+
+test("small Research metrics and canonical equity points retain display precision", () => {
+    const tinyReturn = -0.0116 / 100000;
+    const small = Research.formatPercent(tinyReturn);
+    assert.notEqual(small, "-0.00%");
+    assert.match(small, /0\.0000116%$/);
+    assert.notEqual(Research.formatNumber(0.0000000123), "0");
+
+    const curve = [
+        { timestamp: "2026-04-06T00:00:00Z", equity: 100000 },
+        { timestamp: "2026-04-06T01:00:00Z", equity: 100000.00000012 },
+        { timestamp: "2026-04-06T02:00:00Z", equity: 99999.9884 },
+    ];
+    const points = Research.equityChartPoints({ equity_curve: curve });
+    assert.equal(points.length, curve.length);
+    assert.equal(points[1].y, curve[1].equity);
+    assert.equal(points[2].y, curve[2].equity);
+    assert.deepEqual(points.map(point => point.x), curve.map(point => Date.parse(point.timestamp)));
+
+    const workspace = fs.readFileSync("app/static/js/research-workspace.js", "utf8");
+    const css = fs.readFileSync("app/static/css/research-workspace.css", "utf8");
+    const html = fs.readFileSync("app/templates/research.html", "utf8");
+    assert.match(workspace, /ResearchData\.equityChartPoints\(analysis\)/);
+    assert.match(html, /research-data\.js[\s\S]*research-workspace\.js/);
+    assert.match(css, /\.workspace>\.results\{grid-column:1\/-1;width:min\(100%,1280px\)/);
+});

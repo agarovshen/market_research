@@ -2,21 +2,51 @@ import unittest
 from dataclasses import replace
 from datetime import datetime, timedelta
 from math import sqrt
+import platform
 
 from app.analysis import AnalysisEngine, AnalysisSettings
 from app.backtest import (
     BacktestEngine,
     BacktestResult,
+    BacktestRunConfig,
     BacktestSettings,
     Bar,
+    ExecutionCosts,
     OrderAction,
     Side,
     Signal,
 )
 from app.backtest.models import EquityPoint, Trade
+from app.research.api import _encode_research
+from app.research.models import DateRange, ExperimentDefinition, ExperimentStatus, ResearchResult
+from app.research.parameters import ParameterSet
+from app.research.serialization import decode_result, encode_result
 
 
 START = datetime(2024, 1, 1)
+
+
+class FiftyTwoSmallPnLStrategy:
+    def on_bar(self, context):
+        if context.index < 104 and context.index % 2 == 0:
+            return Signal(OrderAction.OPEN, Side.LONG)
+        if context.index % 2 == 1:
+            return Signal(OrderAction.CLOSE)
+        return None
+
+
+def small_pnl_backtest():
+    gross_loss = 0.0116 / (1 - 0.8303)
+    gross_profit = gross_loss * 0.8303
+    trade_pnls = (gross_profit / 17,) * 17 + (-gross_loss / 35,) * 35
+    prices = [1.34]
+    for trade_pnl in trade_pnls:
+        prices.extend((1.34, 1.34 + trade_pnl + 0.00003))
+    bars = tuple(Bar(START + timedelta(minutes=index), price, price, price, price, spread=3)
+                 for index, price in enumerate(prices))
+    return BacktestEngine(BacktestSettings(
+        initial_cash=100_000, costs=ExecutionCosts(spread_scale=0.00001),
+    )).run(bars, FiftyTwoSmallPnLStrategy())
 
 
 def make_result(equities=(), trade_pnls=(), *, initial=100.0, final=None):
@@ -32,6 +62,57 @@ def make_result(equities=(), trade_pnls=(), *, initial=100.0, final=None):
     ending = final if final is not None else (equities[-1] if equities else initial)
     return BacktestResult(initial, ending, ending, ending - initial, 0.0,
                           0.0, 0.0, 0.0, None, (), trades, points)
+
+
+class SmallPnlResearchPipelineTests(unittest.TestCase):
+    def test_52_trade_small_pnl_survives_backtest_analysis_and_research_serialization(self):
+        backtest = small_pnl_backtest()
+        self.assertEqual(len(backtest.trades), 52)
+        self.assertEqual(len(backtest.equity_curve), 105)
+        self.assertEqual(backtest.equity_curve[0].equity, backtest.initial_cash)
+        self.assertAlmostEqual(sum(trade.net_pnl for trade in backtest.trades), -0.0116, places=10)
+        self.assertAlmostEqual(backtest.final_equity - backtest.initial_cash, -0.0116, places=8)
+        self.assertEqual(backtest.equity_curve[-1].equity, backtest.final_equity)
+        self.assertGreater(len({point.equity for point in backtest.equity_curve}), 1)
+
+        settings = AnalysisSettings(periods_per_year=252)
+        analysis = AnalysisEngine(settings).analyze(backtest)
+        stats = analysis.trades
+        self.assertEqual(stats.total_trades, 52)
+        self.assertEqual(stats.winning_trades, 17)
+        self.assertEqual(stats.losing_trades, 35)
+        self.assertAlmostEqual(stats.win_rate, 17 / 52)
+        self.assertAlmostEqual(stats.net_profit, -0.0116, places=10)
+        self.assertAlmostEqual(stats.expectancy, stats.net_profit / 52)
+        self.assertAlmostEqual(stats.profit_factor, 0.8303, places=10)
+        self.assertNotEqual(analysis.total_return, 0)
+        self.assertAlmostEqual(analysis.total_return,
+                               (backtest.final_equity - backtest.initial_cash) / backtest.initial_cash)
+        self.assertGreater(analysis.drawdown.max_drawdown, 0)
+        self.assertLess(analysis.drawdown.max_drawdown_pct, 0)
+        self.assertGreater(analysis.risk.period_volatility, 0)
+        self.assertIsNotNone(analysis.risk.sharpe_ratio)
+        self.assertIsNotNone(analysis.risk.sortino_ratio)
+        self.assertIsNotNone(analysis.risk.calmar_ratio)
+
+        end = backtest.equity_curve[-1].timestamp + timedelta(minutes=1)
+        definition = ExperimentDefinition(
+            "audit.small_pnl", "1", "EURUSD", "M1", DateRange(START, end),
+            ParameterSet(()), None,
+            BacktestRunConfig("EURUSD", start=START, end=end, initial_cash=100_000,
+                              spread_scale=0.00001),
+            settings, "a" * 64, "b" * 64, platform.python_version(), "1",
+            None, "manual", 1,
+        )
+        research_result = ResearchResult(definition, ExperimentStatus.COMPLETED, backtest, analysis)
+        restored = decode_result(encode_result(research_result))
+        wire = _encode_research(restored)
+        wire_analysis = wire["analysis_result"]
+        self.assertIs(type(wire_analysis["total_return"]), float)
+        self.assertEqual(wire_analysis["total_return"], analysis.total_return)
+        self.assertEqual(wire_analysis["trades"]["net_profit"], analysis.trades.net_profit)
+        self.assertEqual(len(wire_analysis["equity_curve"]), 105)
+        self.assertEqual(wire_analysis["equity_curve"][-1]["equity"], backtest.final_equity)
 
 
 class AnalysisReturnTests(unittest.TestCase):
