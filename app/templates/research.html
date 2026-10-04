@@ -16,16 +16,15 @@
     <div class="workspace">
       <form id="research-form" class="controls">
         <fieldset><legend>Workflow</legend>
-          <label>Research action<select name="mode" id="mode"><option value="single">Single backtest</option><option value="batch">Parameter batch</option><option value="oos">Training → OOS selection</option><option value="walk_forward">Walk-forward</option></select></label>
+          <label>Research action<select name="mode" id="mode"><option value="batch">Parameter batch</option><option value="oos">Training → OOS selection</option><option value="walk_forward">Walk-forward</option></select></label>
           <label>Strategy<select name="strategy_id" id="strategy" required></select></label>
           <label>Instrument<select name="symbol" id="symbol" required></select></label>
           <label>Timeframe<select name="timeframe"><option>M1</option><option>M5</option><option>M15</option><option>H1</option><option>H4</option><option>D1</option></select></label>
           <div class="range"><label>Overall start<input type="datetime-local" name="start" required></label><label>Overall end<input type="datetime-local" name="end" required></label></div>
           <p id="data-range" class="hint">Market data availability will appear here.</p>
         </fieldset>
-        <fieldset><legend>Parameters</legend>
+        <fieldset><legend>Parameter space</legend>
           <p id="parameter-empty" class="hint" hidden>This strategy has no configurable parameters.</p>
-          <div id="single-parameters" class="strategy-parameters"></div>
           <div id="space-parameters" class="strategy-parameters" hidden></div>
         </fieldset>
         <fieldset id="search-config" hidden><legend>Search &amp; selection</legend>
@@ -41,17 +40,6 @@
         <div class="result-heading"><div><small>RESEARCH OUTPUT</small><h2 id="result-title">No experiment loaded</h2></div><button id="clear-results" type="button">Clear</button></div>
         <div id="error" class="error" role="alert" hidden></div><div id="summary" class="metrics" hidden></div>
         <div class="chart-box"><canvas id="equity-chart" aria-label="Selected result equity"></canvas><p id="chart-empty">Equity curve will appear after a completed backtest.</p></div>
-        <section class="trade-history" aria-labelledby="trade-history-title">
-          <div class="result-heading"><div><h3 id="trade-history-title">Trade History</h3><p id="trade-result-context" class="hint">Select a completed experiment to inspect its trades.</p></div><button id="inspect-trades" type="button" disabled>View on price chart</button></div>
-          <p id="trade-empty" class="hint">No completed trades.</p>
-          <div class="table-wrap"><table><thead><tr><th>#</th><th>Side</th><th>Entry time</th><th>Exit time</th><th>Entry</th><th>Exit</th><th>Quantity</th><th>Gross P&amp;L</th><th>Net P&amp;L</th><th>Entry / exit commission</th><th>Chart</th></tr></thead><tbody id="trade-records"></tbody></table></div>
-        </section>
-        <section class="execution-log" aria-labelledby="execution-log-title">
-          <div class="result-heading"><div><h3 id="execution-log-title">Order &amp; Strategy Log</h3><p id="execution-log-context" class="hint">Select a completed experiment to inspect its execution trace.</p></div></div>
-          <p id="execution-log-empty" class="hint">No execution events.</p>
-          <p id="execution-log-warning" class="hint" role="status" hidden></p>
-          <div class="table-wrap"><table><thead><tr><th>#</th><th>Time</th><th>Bar</th><th>Event</th><th>Side</th><th>Order</th><th>Trade</th><th>Price</th><th>Quantity</th><th>Trigger</th><th>Stop loss</th><th>Details</th></tr></thead><tbody id="execution-log-records"></tbody></table></div>
-        </section>
         <div class="advanced-tools" id="advanced-tools" hidden>
           <label>Metric<select id="advanced-metric"><option value="total_return">Total return</option><option value="trades.net_profit">Net profit</option><option value="risk.sharpe_ratio">Sharpe</option></select></label>
           <label>Seed<input id="mc-seed" type="number" value="42"></label><label>Simulations<input id="mc-count" type="number" min="1" max="100000" value="1000"></label>
@@ -74,8 +62,6 @@
   </main>
   <script src="/static/js/research-state.js"></script>
   <script src="/static/js/research-parameters.js"></script>
-  <script src="/static/js/trade-history.js"></script>
-  <script src="/static/js/execution-log.js"></script>
   <script src="/static/js/research-presentation.js"></script>
   <script src="/static/js/research-workspace.js"></script>
 </body>

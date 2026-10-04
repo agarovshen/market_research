@@ -4,7 +4,6 @@
   const form = $("research-form"), state = { ids: [], sensitivityIds: [], sensitivityParameters: [], correlationIds: [], baselineId: null, monteCarloId: null, chart: null, advancedChart: null, researchBusy: false, advancedBusy: false, results: [], selectedExperimentId: null };
   let strategySchema = [];
   const fmt = value => value == null ? "—" : new Intl.NumberFormat(undefined,{maximumFractionDigits:4}).format(value);
-  const tradeFmt = value => value == null ? "—" : new Intl.NumberFormat(undefined,{maximumFractionDigits:12}).format(value);
   async function request(path, body) {
     const response = await fetch("/api/research" + path, body ? {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)} : {});
     const data = await response.json();
@@ -29,10 +28,10 @@
   }
   function updateMode() {
     const mode=$("mode").value;
-    $("single-parameters").hidden=mode!=="single"; $("space-parameters").hidden=mode==="single";
+    $("space-parameters").hidden=false;
     $("parameter-empty").hidden=strategySchema.length>0;
-    $("search-config").hidden=mode==="single"; $("split-config").hidden=mode!=="oos"; $("walk-config").hidden=mode!=="walk_forward";
-    $("run-button").textContent={single:"Run single backtest",batch:"Run parameter batch",oos:"Select on train → evaluate OOS",walk_forward:"Run walk-forward"}[mode];
+    $("search-config").hidden=false; $("split-config").hidden=mode!=="oos"; $("walk-config").hidden=mode!=="walk_forward";
+    $("run-button").textContent={batch:"Run parameter batch",oos:"Select on train → evaluate OOS",walk_forward:"Run walk-forward"}[mode];
   }
   function valueControl(definition, value, role) {
     const input=document.createElement(definition.kind==="choice"?"select":"input");
@@ -53,13 +52,11 @@
   }
   function renderStrategyParameters(strategy) {
     strategySchema=Array.isArray(strategy?.parameters)?strategy.parameters:[];
-    const single=$("single-parameters"), batch=$("space-parameters");
-    for(const container of [single,batch]) container.replaceChildren();
+    const batch=$("space-parameters");
+    batch.replaceChildren();
     $("parameter-empty").hidden=strategySchema.length>0;
     for(const definition of strategySchema){
       const label=definition.label||definition.name.replaceAll("_"," ");
-      const one=document.createElement("label");one.dataset.parameter=definition.name;one.textContent=label;
-      one.append(valueControl(definition,definition.default,"value"));single.append(one);
       const group=document.createElement("fieldset");group.className="strategy-parameter";group.dataset.parameter=definition.name;
       const legend=document.createElement("legend");legend.textContent=label;group.append(legend);
       const fixedLabel=document.createElement("label");fixedLabel.textContent="Fixed value";
@@ -91,7 +88,7 @@
     const values={};
     for(const definition of strategySchema){
       const group=[...container.querySelectorAll("[data-parameter]")].find(item=>item.dataset.parameter===definition.name);
-      if(searching&&!group)throw new Error(`Missing controls for strategy parameter ${definition.name}`);
+      if(!group)throw new Error(`Missing controls for strategy parameter ${definition.name}`);
       const owner=group;
       const control=owner?.querySelector('[data-role="value"]');
       const raw={value:control.value};
@@ -143,8 +140,6 @@
       commission_rate:Number(fields.get("commission_rate")),spread_scale:Number(fields.get("spread_scale")),slippage:Number(fields.get("slippage"))};
     body.risk_free_rate=Number(fields.get("risk_free_rate"));body.target_return=Number(fields.get("target_return"));
     if(fields.get("periods_per_year"))body.periods_per_year=Number(fields.get("periods_per_year"));
-    const parameters=ResearchParameters.makePayload(strategySchema,readParameterValues($("single-parameters"),false),false);
-    if(mode==="single"){body.parameters=parameters.parameters;return body;}
     const search=ResearchParameters.makePayload(strategySchema,readParameterValues($("space-parameters"),true),true);
     body.parameter_space=search.parameter_space;
     if(!search.parameter_space.some(item=>item.kind!=="fixed")){
@@ -173,50 +168,9 @@
         scales:{x:{type:"time",time:{unit:"day"},ticks:{color:"#748798",maxTicksLimit:8},grid:{color:"#24313b"}},
           y:{ticks:{color:"#748798"},grid:{color:"#24313b"}}}}});
   }
-  function renderTradeHistory(row) {
-    const body=$("trade-records");body.replaceChildren();
-    const result=row?.backtest_result;
-    const parsed=result?TradeHistory.readTrades(result):{trades:[],malformedCount:0};
-    const trades=parsed.trades;
-    $("trade-empty").hidden=trades.length>0;
-    $("inspect-trades").disabled=!result||trades.length===0;
-    $("trade-result-context").textContent=row
-      ? `${row.definition.phase.toUpperCase()} · ${row.definition.symbol} ${row.definition.timeframe} · ${row.definition.experiment_id}${parsed.malformedCount?` · ${parsed.malformedCount} malformed trade row(s) omitted`:` · ${trades.length} completed trades`}`
-      : "Select a completed experiment to inspect its trades.";
-    body.replaceChildren(...trades.map(trade=>{
-      const tr=document.createElement("tr");tr.dataset.tradeId=String(trade.id);
-      const values=[trade.id,trade.side,new Date(trade.entry_time).toLocaleString(),new Date(trade.exit_time).toLocaleString(),tradeFmt(trade.entry_price),tradeFmt(trade.exit_price),tradeFmt(trade.quantity),tradeFmt(trade.gross_pnl),tradeFmt(trade.net_pnl),`${tradeFmt(trade.entry_commission)} / ${tradeFmt(trade.exit_commission)}`];
-      for(const value of values){const td=document.createElement("td");td.textContent=value??"—";tr.append(td);}
-      const action=document.createElement("td"),inspect=document.createElement("button");inspect.type="button";inspect.textContent="Chart";inspect.setAttribute("aria-label",`Show trade ${trade.id} on price chart`);
-      inspect.addEventListener("click",()=>openPriceChart(row,trade,true));action.append(inspect);tr.append(action);
-      return tr;
-    }));
-  }
-  function renderExecutionLog(row) {
-    const body=$("execution-log-records");body.replaceChildren();
-    const parsed=ExecutionLog.readEvents(row?.backtest_result);
-    const events=parsed.events;
-    $("execution-log-empty").hidden=events.length>0;
-    $("execution-log-warning").hidden=parsed.malformedCount===0;
-    $("execution-log-warning").textContent=parsed.malformedCount
-      ? `${parsed.malformedCount} malformed execution event(s) omitted.`:"";
-    $("execution-log-context").textContent=row
-      ? `${row.definition.strategy_id} · ${row.definition.symbol} ${row.definition.timeframe} · ${events.length} canonical event(s)`
-      : "Select a completed experiment to inspect its execution trace.";
-    const cell=(value)=>{const td=document.createElement("td");td.textContent=value==null?"—":String(value);return td;};
-    body.replaceChildren(...events.map(event=>{
-      const tr=document.createElement("tr");tr.dataset.eventSequence=String(event.sequence);
-      tr.append(cell(event.sequence),cell(event.timestamp),cell(event.bar_index),
-        cell(event.event_type.toUpperCase()),cell(event.side?.toUpperCase()),
-        cell(event.order_id),cell(event.trade_id),cell(event.price),
-        cell(event.quantity),cell(event.trigger_price),cell(event.stop_loss),
-        cell(ExecutionLog.detailText(event)));
-      return tr;
-    }));
-  }
   function selectExperiment(id) {
     state.selectedExperimentId=id;
-    const row=TradeHistory.resultForId(state.results,id);
+    const row=state.results.find(item=>item.status==="completed"&&item.definition?.experiment_id===id)||null;
     for(const tr of $("records").rows)tr.classList.toggle("selected-result",tr.dataset.experimentId===id);
     const analysis=row?.analysis_result;
     const metrics={"Selected total return":analysis?.total_return==null?"—":`${(analysis.total_return*100).toFixed(2)}%`,
@@ -227,15 +181,7 @@
       "Period volatility":fmt(analysis?.risk?.period_volatility),"Sharpe":fmt(analysis?.risk?.sharpe_ratio),
       "Sortino":fmt(analysis?.risk?.sortino_ratio),"Calmar":fmt(analysis?.risk?.calmar_ratio)};
     for(const card of $("summary").querySelectorAll(".metric")){const label=card.querySelector("small").textContent;if(label in metrics)card.querySelector("b").textContent=metrics[label];}
-    renderChart(row?.analysis_result||null);renderTradeHistory(row||null);renderExecutionLog(row||null);
-  }
-  function openPriceChart(row, trade, focusTrade = false) {
-    if(!row?.backtest_result||!trade)return;
-    try{
-      sessionStorage.setItem("marketResearch.selectedBacktest",JSON.stringify(
-        TradeHistory.chartHandoff(row,trade,focusTrade)));
-      window.location.assign("/");
-    }catch(reason){error(`Unable to open the selected trade chart: ${reason.message||"session storage is unavailable"}`);}
+    renderChart(row?.analysis_result||null);
   }
   function render(result) {
     if(state.advancedChart){state.advancedChart.destroy();state.advancedChart=null;}
@@ -298,7 +244,7 @@
         tr.addEventListener("keydown",event=>{if(event.key==="Enter"||event.key===" "){event.preventDefault();selectExperiment(d.experiment_id);}});
       }
       return tr;}));
-    if(state.selectedExperimentId)selectExperiment(state.selectedExperimentId);else{renderChart(null);renderTradeHistory(null);renderExecutionLog(null);}
+    if(state.selectedExperimentId)selectExperiment(state.selectedExperimentId);else renderChart(null);
     $("advanced-tools").hidden=!state.ids.length;
   }
   form.addEventListener("submit",async event=>{event.preventDefault();if(state.advancedBusy)return;error("");const button=$("run-button");state.researchBusy=true;button.disabled=true;button.textContent="Running…";syncAdvancedButtons();$("clear-results").disabled=true;
@@ -321,14 +267,8 @@
     if(state.advancedChart){state.advancedChart.destroy();state.advancedChart=null;}
     if(state.chart){state.chart.destroy();state.chart=null;}
     $("records").replaceChildren();$("summary").hidden=true;$("advanced-tools").hidden=true;$("chart-empty").hidden=false;
-    renderChart(null);renderTradeHistory(null);renderExecutionLog(null);
+    renderChart(null);
     $("result-title").textContent="No experiment loaded";$("advanced-output").hidden=true;});
-  $("inspect-trades").addEventListener("click",()=>{
-    const row=TradeHistory.resultForId(state.results,state.selectedExperimentId);
-    if(!row?.backtest_result)return;
-    const trade=TradeHistory.tradesFromBacktest(row.backtest_result)[0];if(!trade)return;
-    openPriceChart(row,trade,false);
-  });
   function renderAdvanced(result){
     const out=$("advanced-output"),view=ResearchPresentation.advancedView(result);
     if(state.advancedChart){state.advancedChart.destroy();state.advancedChart=null;}

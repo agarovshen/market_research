@@ -330,11 +330,17 @@ class ResearchAPIIntegrationTests(unittest.TestCase):
             catalog = service.market_data_catalog("EURUSD")
             self.assertEqual(catalog["count"], len(market_bars()))
             from fastapi.templating import Jinja2Templates
-            html = Jinja2Templates(directory="app/templates").get_template(
+            templates = Jinja2Templates(directory="app/templates")
+            html = templates.get_template(
                 "research.html").render(request=None)
-            self.assertIn("Single backtest", html)
+            self.assertNotIn("Single backtest", html)
             self.assertIn("Training → OOS selection", html)
             self.assertIn("correlation-hint", html)
+            main_html = templates.get_template("index.html").render(request=None)
+            self.assertIn('id="test-form"', main_html)
+            self.assertIn("Trade History", main_html)
+            self.assertIn("Order &amp; Strategy Log", main_html)
+            self.assertNotIn("Monte Carlo", main_html)
             body = {
                 "mode": "single", "strategy_id": "moving_average.sma_crossover",
                 "symbol": "EURUSD", "timeframe": "M1",

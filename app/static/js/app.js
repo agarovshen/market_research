@@ -210,7 +210,22 @@
     }
     document.addEventListener("keydown", handleShortcut);
 
-    window.addEventListener("research:backtest-result", event => chart.setBacktestResult(event.detail));
+    function showBacktestOnChart(handoff) {
+        if (!handoff?.backtest_result || !ResearchData.TIMEFRAMES.includes(handoff.timeframe)) return;
+        pendingBacktest = handoff;
+        if (handoff.symbol && [...instrument.options].some(option => option.value === handoff.symbol)) {
+            instrument.value = handoff.symbol;
+            state.instrument = handoff.symbol;
+        }
+        state.timeframe = handoff.timeframe;
+        fetchMarketData({ keepContext: false, centerTimestamp: handoff.center_timestamp || null });
+    }
+
+    window.addEventListener("research:backtest-result", event => {
+        if (event.detail?.backtest_result) showBacktestOnChart(event.detail);
+        else chart.setBacktestResult(event.detail);
+    });
+    window.addEventListener("research:focus-trade", event => showBacktestOnChart(event.detail));
     window.addEventListener("research:signals", event => chart.setSignals(event.detail));
 
     (async () => {

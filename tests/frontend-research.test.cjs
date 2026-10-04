@@ -109,8 +109,9 @@ test("research form consumes API strategy schemas without SMA-specific parameter
     const workspace = fs.readFileSync("app/static/js/research-workspace.js", "utf8");
     const service = fs.readFileSync("app/research/service.py", "utf8");
     const engine = fs.readFileSync("app/research/engine.py", "utf8");
-    assert.match(html, /id="single-parameters"/);
     assert.match(html, /id="space-parameters"/);
+    assert.match(html, /Parameter batch/);
+    assert.doesNotMatch(html, /Single backtest/);
     for (const text of ["fast_period", "slow_period", "Fast period", "Slow period"]) {
         assert.equal(html.includes(text), false);
         assert.equal(workspace.includes(text), false);
@@ -170,16 +171,34 @@ test("all trades are retained and malformed trade records are isolated", () => {
     assert.equal(mixed.malformedCount, 1);
 });
 
-test("main workspace renders a persistent full execution trace in canonical order", () => {
-    const html = fs.readFileSync("app/templates/research.html", "utf8");
-    const workspace = fs.readFileSync("app/static/js/research-workspace.js", "utf8");
-    assert.match(html, /id="execution-log-title">Order &amp; Strategy Log/);
-    assert.match(html, /id="execution-log-empty"[^>]*>No execution events\./);
-    assert.match(html, /id="trade-empty"[^>]*>No completed trades\./);
-    assert.match(workspace, /renderExecutionLog\(row\|\|null\)/);
-    assert.match(workspace, /openPriceChart\(row,trade,true\)/);
-    assert.match(workspace, /openPriceChart\(row,trade,false\)/);
+test("main and research pages keep single-test and research-analysis responsibilities separate", () => {
+    const main = fs.readFileSync("app/templates/index.html", "utf8");
+    const research = fs.readFileSync("app/templates/research.html", "utf8");
+    const runner = fs.readFileSync("app/static/js/backtest-workspace.js", "utf8");
+    const app = fs.readFileSync("app/static/js/app.js", "utf8");
+    assert.match(main, /id="test-form"/);
+    for (const field of ["test-strategy", "instrument", "test-timeframe", "test-start", "test-end", "test-parameters"])
+        assert.match(main, new RegExp(`id="${field}"`));
+    assert.match(main, /id="price-chart"/);
+    assert.match(main, /id="trade-history-title">Trade History/);
+    assert.match(main, /id="execution-log-title">Order &amp; Strategy Log/);
+    assert.match(main, /id="execution-log-empty">No execution events\./);
+    assert.match(main, /id="trade-empty">No completed trades\./);
+    assert.match(main, /research-result-sections\.js/);
+    assert.match(runner, /request\("\/api\/research\/run"/);
+    assert.match(runner, /mode: "single"/);
+    assert.match(runner, /ResearchResultSections\.renderTradeHistory/);
+    assert.match(runner, /ResearchResultSections\.renderExecutionLog/);
+    assert.match(runner, /TradeHistory\.chartHandoff/);
+    assert.match(app, /research:focus-trade/);
+    assert.doesNotMatch(research, /Trade History|Order &amp; Strategy Log|trade-records|execution-log-records/);
+    assert.match(research, /Training → OOS selection/);
+    assert.match(research, /Walk-forward/);
+    assert.match(research, /advanced-tools/);
+    assert.match(research, /Experiment records/);
+});
 
+test("canonical execution event reader retains event order and malformed isolation", () => {
     const raw = [
         { sequence: 1, timestamp: rows[0].timestamp, event_type: "bar", bar_index: 0, details: [["low", 9]] },
         { sequence: 2, timestamp: rows[0].timestamp, event_type: "order_created", order_id: 5,

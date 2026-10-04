@@ -6,6 +6,7 @@
     <meta name="color-scheme" content="dark">
     <title>Market Research</title>
     <link rel="stylesheet" href="/static/css/tailwind.css">
+    <link rel="stylesheet" href="/static/css/backtest-workspace.css">
     <script src="/static/js/chart.js"></script>
     <script src="/static/js/luxon.min.js"></script>
     <script src="/static/js/chartjs-adapter-luxon.min.js"></script>
@@ -15,15 +16,12 @@
 </head>
 <body class="research-app">
     <header class="terminal-header">
-        <a href="/research" class="file-button">Research workspace</a>
+        <a href="/research" class="file-button">Research &amp; analysis</a>
         <div class="brand-lockup">
             <div class="brand-mark" aria-hidden="true">MR</div>
-            <div><h1>Market Research</h1><p>Historical data &amp; strategy research</p></div>
+            <div><h1>Market Research</h1><p>Single-test execution &amp; market data</p></div>
         </div>
         <div class="header-actions">
-            <label class="instrument-control"><span>Instrument</span>
-                <select id="instrument" aria-label="Instrument"><option value="EURUSD">EURUSD</option></select>
-            </label>
             <form id="import-form" class="import-form">
                 <label class="file-button" for="csv-file">Import data</label>
                 <input id="csv-file" type="file" accept=".csv,.txt">
@@ -45,7 +43,38 @@
             <div id="status" class="status" role="status" aria-live="polite"></div>
         </div>
 
-        <section class="chart-workspace" aria-label="Quantitative research chart">
+        <section class="test-workspace" aria-labelledby="test-workspace-title">
+            <div class="test-heading"><div><span class="eyebrow">BACKTEST</span><h2 id="test-workspace-title">Run a test</h2></div><p id="test-api-status" role="status">Loading strategy configuration…</p></div>
+            <form id="test-form" class="test-form">
+                <fieldset><legend>Test setup</legend>
+                    <label>Strategy<select id="test-strategy" name="strategy_id" required></select></label>
+                    <label>Instrument<select id="instrument" name="symbol" aria-label="Instrument" required><option value="EURUSD">EURUSD</option></select></label>
+                    <label>Timeframe<select id="test-timeframe" name="timeframe" required><option>M1</option><option>M5</option><option>M15</option><option>H1</option><option selected>H4</option><option>D1</option></select></label>
+                    <label>Test start<input id="test-start" name="start" type="datetime-local" required></label>
+                    <label>Test end<input id="test-end" name="end" type="datetime-local" required></label>
+                    <small id="test-data-range">Market data range will appear here.</small>
+                </fieldset>
+                <fieldset><legend>Execution assumptions</legend>
+                    <label>Initial capital<input name="initial_cash" type="number" min="0.01" step="any" value="100000" required></label>
+                    <label>Quantity<input name="position_size" type="number" min="0.000001" step="any" value="1" required></label>
+                    <label>Commission / unit<input name="commission_per_unit" type="number" min="0" step="any" value="0" required></label>
+                    <label>Commission rate<input name="commission_rate" type="number" min="0" step="any" value="0" required></label>
+                    <label>Spread scale<input name="spread_scale" type="number" min="0" step="any" value="1" required></label>
+                    <label>Slippage<input name="slippage" type="number" min="0" step="any" value="0" required></label>
+                    <label>Periods per year<input name="periods_per_year" type="number" min="0.000001" step="any" placeholder="Optional"></label>
+                    <label>Annual risk-free rate<input name="risk_free_rate" type="number" min="-0.999999" step="any" value="0" required></label>
+                    <label>Annual target return<input name="target_return" type="number" min="-0.999999" step="any" value="0" required></label>
+                </fieldset>
+                <fieldset><legend>Strategy parameters</legend><div id="test-parameters" class="test-parameters"></div><p id="test-parameter-empty" hidden>This strategy has no configurable parameters.</p></fieldset>
+                <div class="test-actions"><button id="test-run-button" type="submit">Run Test</button><p id="test-error" role="alert" hidden></p></div>
+            </form>
+            <section id="test-result" class="test-result" aria-live="polite" hidden>
+                <div class="test-heading"><div><span class="eyebrow">LATEST TEST</span><h2 id="test-result-title">No test run</h2></div></div>
+                <div id="test-result-metrics" class="test-metrics"></div>
+            </section>
+        </section>
+
+        <section class="chart-workspace" aria-label="Backtest price chart">
             <div class="chart-toolbar" role="toolbar" aria-label="Chart controls">
                 <div class="toolbar-group timeframe-group" role="group" aria-label="Timeframe">
                     <button type="button" data-timeframe="M1" class="timeframe-button active">M1</button>
@@ -115,6 +144,19 @@
             <div class="chart-footer"><span id="selection-status">Click a bar to select · double-click to freeze</span><span>Wheel zoom · drag pan · Shift-drag zoom · pinch zoom · R reset · C crosshair</span></div>
         </section>
 
+        <section class="trade-history" aria-labelledby="trade-history-title">
+            <div class="test-heading"><div><h2 id="trade-history-title">Trade History</h2><p id="trade-result-context">No test result selected.</p></div><button id="inspect-trades" type="button" disabled>View on price chart</button></div>
+            <p id="trade-empty">No completed trades.</p>
+            <div class="test-table"><table><thead><tr><th>#</th><th>Side</th><th>Entry time</th><th>Exit time</th><th>Entry</th><th>Exit</th><th>Quantity</th><th>Gross P&amp;L</th><th>Net P&amp;L</th><th>Entry / exit commission</th><th>Chart</th></tr></thead><tbody id="trade-records"></tbody></table></div>
+        </section>
+
+        <section class="execution-log" aria-labelledby="execution-log-title">
+            <div class="test-heading"><div><h2 id="execution-log-title">Order &amp; Strategy Log</h2><p id="execution-log-context">No test result selected.</p></div></div>
+            <p id="execution-log-empty">No execution events.</p>
+            <p id="execution-log-warning" role="status" hidden></p>
+            <div class="test-table"><table><thead><tr><th>#</th><th>Time</th><th>Bar</th><th>Event</th><th>Side</th><th>Order</th><th>Trade</th><th>Price</th><th>Quantity</th><th>Trigger</th><th>Stop loss</th><th>Details</th></tr></thead><tbody id="execution-log-records"></tbody></table></div>
+        </section>
+
         <section class="data-import-dock" aria-label="Import status">
             <span class="dock-indicator"></span><span>Historical data</span><span class="dock-muted">CSV · PostgreSQL</span>
             <span id="import-status" class="dock-status">Ready</span>
@@ -123,6 +165,11 @@
     <script src="/static/js/research-data.js"></script>
     <script src="/static/js/research-chart.js"></script>
     <script src="/static/js/import-lock.js"></script>
+    <script src="/static/js/research-parameters.js"></script>
+    <script src="/static/js/trade-history.js"></script>
+    <script src="/static/js/execution-log.js"></script>
+    <script src="/static/js/research-result-sections.js"></script>
     <script src="/static/js/app.js"></script>
+    <script src="/static/js/backtest-workspace.js"></script>
 </body>
 </html>
