@@ -52,6 +52,14 @@ class ResearchExperimentRecord(Base):
                                                  server_default=func.now())
 
 
+class LatestTestRecord(Base):
+    """Durable pointer to the last successful single Test in the shared store."""
+    __tablename__ = "research_latest_test"
+
+    key: Mapped[str] = mapped_column(String(16), primary_key=True)
+    experiment_id: Mapped[str] = mapped_column(String(64), nullable=False)
+
+
 class ResearchResultRepository:
     """Store tagged JSON results in the project's existing SQLAlchemy database."""
 
@@ -101,6 +109,45 @@ class ResearchResultRepository:
     def get(self, experiment_id: str) -> ResearchResult | None:
         record = self.session.get(ResearchExperimentRecord, experiment_id)
         return None if record is None else decode_result(record.payload)
+
+    def latest_single_run(self) -> ResearchResult | None:
+        """Return the canonical result referenced by the latest-test pointer."""
+        pointer = self.session.get(LatestTestRecord, "latest")
+        if pointer is not None:
+            result = self.get(pointer.experiment_id)
+            if (result is not None and result.status.value == "completed"
+                    and result.definition.phase.value == "batch"
+                    and result.definition.search_method == "manual"):
+                return result
+            return None
+        # Compatibility for databases upgraded after earlier single runs.
+        records = self.session.scalars(
+            select(ResearchExperimentRecord)
+            .where(ResearchExperimentRecord.status == "completed")
+            .order_by(ResearchExperimentRecord.created_at.desc(),
+                      ResearchExperimentRecord.experiment_id.desc())
+        ).all()
+        for record in records:
+            result = decode_result(record.payload)
+            if (result.status.value == "completed"
+                    and result.definition.phase.value == "batch"
+                    and result.definition.search_method == "manual"):
+                return result
+        return None
+
+    def mark_latest_single(self, result: ResearchResult) -> None:
+        """Publish only a completed, persisted canonical single-run result."""
+        if (result.status.value != "completed" or result.backtest_result is None
+                or result.analysis_result is None
+                or result.definition.phase.value != "batch"
+                or result.definition.search_method != "manual"):
+            return
+        record = self.session.get(LatestTestRecord, "latest")
+        if record is None:
+            self.session.add(LatestTestRecord(key="latest",
+                                             experiment_id=result.definition.experiment_id))
+        else:
+            record.experiment_id = result.definition.experiment_id
 
     def list_for_strategy(self, strategy_id: str) -> tuple[ResearchResult, ...]:
         records = self.session.scalars(

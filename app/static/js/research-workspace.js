@@ -1,7 +1,7 @@
 (() => {
   "use strict";
   const $ = id => document.getElementById(id);
-  const form = $("research-form"), state = { ids: [], sensitivityIds: [], sensitivityParameters: [], correlationIds: [], baselineId: null, monteCarloId: null, chart: null, advancedChart: null, researchBusy: false, advancedBusy: false, results: [], selectedExperimentId: null };
+  const form = $("research-form"), state = { ids: [], sensitivityIds: [], sensitivityParameters: [], correlationIds: [], baselineId: null, monteCarloId: null, chart: null, advancedChart: null, researchBusy: false, advancedBusy: false, results: [], selectedExperimentId: null, latestTest: null };
   let strategySchema = [];
   const fmt = value => value == null ? "—" : new Intl.NumberFormat(undefined,{maximumFractionDigits:4}).format(value);
   async function request(path, body) {
@@ -50,7 +50,7 @@
     }
     return input;
   }
-  function renderStrategyParameters(strategy) {
+  function renderStrategyParameters(strategy, fixedValues={}) {
     strategySchema=Array.isArray(strategy?.parameters)?strategy.parameters:[];
     const batch=$("space-parameters");
     batch.replaceChildren();
@@ -60,7 +60,8 @@
       const group=document.createElement("fieldset");group.className="strategy-parameter";group.dataset.parameter=definition.name;
       const legend=document.createElement("legend");legend.textContent=label;group.append(legend);
       const fixedLabel=document.createElement("label");fixedLabel.textContent="Fixed value";
-      fixedLabel.append(valueControl(definition,definition.default,"value"));group.append(fixedLabel);
+      const fixedValue=Object.hasOwn(fixedValues,definition.name)?fixedValues[definition.name]:definition.default;
+      fixedLabel.append(valueControl(definition,fixedValue,"value"));group.append(fixedLabel);
       const optimizeLabel=document.createElement("label");optimizeLabel.className="parameter-vary";
       const optimize=document.createElement("input");optimize.type="checkbox";optimize.dataset.role="optimize";
       optimizeLabel.append(optimize,document.createTextNode(" Vary in research"));group.append(optimizeLabel);
@@ -101,33 +102,49 @@
     }
     return values;
   }
+  function renderSourceContext(result) {
+    const definition=result?.definition;
+    const available=!!(definition&&result.status==="completed");
+    const previousId=state.latestTest?.definition?.experiment_id;
+    state.latestTest=available?result:null;
+    $("source-empty").hidden=available;
+    $("source-context").hidden=!available;
+    $("run-button").disabled=!available;
+    if(!available){$("source-context").replaceChildren();renderStrategyParameters(null);return;}
+    const config=definition.backtest_config||{},period=definition.period||{};
+    const values=[
+      ["Strategy",`${definition.strategy_id} · v${definition.strategy_version}`],
+      ["Instrument / timeframe",`${definition.symbol} · ${definition.timeframe}`],
+      ["Test period",`${period.start||"—"} → ${period.end||"—"}`],
+      ["Parameters",JSON.stringify(Object.fromEntries(definition.parameters?.values||[]))],
+      ["Execution assumptions",`capital ${config.initial_cash??"—"} · quantity ${config.position_size??"—"} · commission ${config.commission_per_unit??"—"}/${config.commission_rate??"—"} · spread ${config.spread_scale??"—"} · slippage ${config.slippage??"—"}`],
+    ];
+    const target=$("source-context");target.replaceChildren(...values.flatMap(([label,value])=>{
+      const term=document.createElement("dt"),description=document.createElement("dd");term.textContent=label;description.textContent=value;return [term,description];
+    }));
+    if(previousId!==definition.experiment_id){
+      for(const name of ["training_start","training_end","testing_start","testing_end"])
+        form.elements[name].value="";
+    }
+    const strategy=($("api-status")._strategies||[]).find(item=>item.id===definition.strategy_id);
+    renderStrategyParameters(strategy,Object.fromEntries(definition.parameters?.values||[]));
+    initializeSplit();
+  }
+  async function refreshLatestTest() {
+    const latest=await request("/latest-test");
+    renderSourceContext(latest);
+    if(latest)render({results:[latest]});
+    else render({results:[]});
+  }
   async function loadCatalog() {
     try {
       const strategies=await request("/strategies");
-      $("strategy").replaceChildren(...strategies.map(item=>{const option=document.createElement("option");option.value=item.id;option.textContent=item.id+" · v"+item.version;return option;}));
-      if(!strategies.length) throw new Error("No strategies are registered.");
-      $("strategy")._researchStrategies=strategies;
-      renderStrategyParameters(strategies[0]);
-      const response=await fetch("/instruments"); const instruments=await response.json();
-      if(!response.ok) throw new Error("Unable to load instruments.");
-      $("symbol").replaceChildren(...instruments.map(item=>{const option=document.createElement("option");option.value=item.symbol;option.textContent=item.symbol;return option;}));
-      if(!instruments.length) throw new Error("No instruments are available. Import market data first.");
-      await loadRange(); status("Research API ready");
+      $("api-status")._strategies=Array.isArray(strategies)?strategies:[];
+      await refreshLatestTest(); status(state.latestTest?"Latest Test loaded":"Run a Test on the main workspace to begin research");
     } catch (reason) { status(reason.message,true); error(reason.message); }
   }
-  async function loadRange() {
-    const data=await request("/market-data/"+encodeURIComponent($("symbol").value));
-    $("data-range").textContent=data.count ? data.count.toLocaleString()+" stored rows · "+data.start+" through "+data.end : "No market data stored for this instrument.";
-    if(data.count){const start=String(data.start).slice(0,16),end=addMinutes(String(data.end),intervalMinutes($("research-form").elements.timeframe.value));
-      if(!form.elements.start.value)form.elements.start.value=start;
-      if(!form.elements.end.value)form.elements.end.value=end;
-      initializeSplit();}
-  }
-  function intervalMinutes(timeframe){return {M1:1,M5:5,M15:15,H1:60,H4:240,D1:1440}[timeframe]||1;}
-  function addMinutes(value,amount){const parts=value.slice(0,16).split(/[-T:]/).map(Number);
-    const date=new Date(Date.UTC(parts[0],parts[1]-1,parts[2],parts[3],parts[4]+amount));
-    return date.toISOString().slice(0,16);}
-  function initializeSplit(){const start=form.elements.start.value,end=form.elements.end.value;
+  function initializeSplit(){const period=state.latestTest?.definition?.period;
+    const start=String(period?.start||"").slice(0,16),end=String(period?.end||"").slice(0,16);
     if(!start||!end||form.elements.training_start.value)return;
     const left=Date.parse(start+"Z"),right=Date.parse(end+"Z"),cut=new Date(left+(right-left)*.7);
     const boundary=cut.toISOString().slice(0,16);
@@ -135,11 +152,15 @@
     form.elements.testing_start.value=boundary;form.elements.testing_end.value=end;}
   function payload() {
     const fields=new FormData(form), mode=fields.get("mode");
-    const body={mode:mode,strategy_id:fields.get("strategy_id"),symbol:fields.get("symbol"),timeframe:fields.get("timeframe"),start:fields.get("start"),end:fields.get("end"),
-      initial_cash:Number(fields.get("initial_cash")),position_size:Number(fields.get("position_size")),commission_per_unit:Number(fields.get("commission_per_unit")),
-      commission_rate:Number(fields.get("commission_rate")),spread_scale:Number(fields.get("spread_scale")),slippage:Number(fields.get("slippage"))};
-    body.risk_free_rate=Number(fields.get("risk_free_rate"));body.target_return=Number(fields.get("target_return"));
-    if(fields.get("periods_per_year"))body.periods_per_year=Number(fields.get("periods_per_year"));
+    const definition=state.latestTest?.definition;
+    if(!definition)throw new Error("Run a successful Test on the main workspace before starting research.");
+    const config=definition.backtest_config||{},analysis=definition.analysis_config||{},period=definition.period||{};
+    const body={mode:mode,strategy_id:definition.strategy_id,symbol:definition.symbol,timeframe:definition.timeframe,
+      start:period.start,end:period.end,
+      initial_cash:config.initial_cash,position_size:config.position_size,commission_per_unit:config.commission_per_unit,
+      commission_rate:config.commission_rate,spread_scale:config.spread_scale,slippage:config.slippage,
+      risk_free_rate:analysis.risk_free_rate,target_return:analysis.target_return};
+    if(analysis.periods_per_year!=null)body.periods_per_year=analysis.periods_per_year;
     const search=ResearchParameters.makePayload(strategySchema,readParameterValues($("space-parameters"),true),true);
     body.parameter_space=search.parameter_space;
     if(!search.parameter_space.some(item=>item.kind!=="fixed")){
@@ -252,11 +273,10 @@
     catch(reason){error(reason.message);status("Research run failed",true);if(state.ids.length)$("result-title").textContent="Previous results · new run failed";}
     finally{state.researchBusy=false;button.disabled=false;$("clear-results").disabled=false;syncAdvancedButtons();updateMode();}});
   $("mode").addEventListener("change",()=>{updateMode();initializeSplit();});
-  $("strategy").addEventListener("change",event=>{
-    const strategies=event.currentTarget._researchStrategies||[];
-    renderStrategyParameters(strategies.find(item=>item.id===event.currentTarget.value));
-  });
-  $("symbol").addEventListener("change",()=>loadRange().catch(reason=>error(reason.message)));
+  if(typeof BroadcastChannel!=="undefined"){
+    const channel=new BroadcastChannel("market-research-latest-test");
+    channel.addEventListener("message",()=>refreshLatestTest().catch(reason=>{status(reason.message,true);error(reason.message);}));
+  }
   $("clear-results").addEventListener("click",()=>{state.ids=[];state.sensitivityIds=[];state.sensitivityParameters=[];state.correlationIds=[];state.baselineId=null;state.monteCarloId=null;state.results=[];state.selectedExperimentId=null;
     for(const id of ["run-sensitivity","run-robustness","run-correlation","run-portfolio","run-mc","run-regime"])
       $(id).disabled=true;

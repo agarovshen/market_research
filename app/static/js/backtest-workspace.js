@@ -215,6 +215,11 @@
                 throw new Error(failed ? `${failed.exception_type}: ${failed.message}` : "The test produced no completed result.");
             }
             renderResult(row);
+            if (typeof BroadcastChannel !== "undefined") {
+                const channel = new BroadcastChannel("market-research-latest-test");
+                channel.postMessage({ experiment_id: row.definition.experiment_id });
+                channel.close();
+            }
             setStatus("Test completed");
         } catch (error) {
             $("test-error").textContent = error.message || "Test failed.";

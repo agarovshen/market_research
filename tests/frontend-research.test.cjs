@@ -118,8 +118,8 @@ test("research form consumes API strategy schemas without SMA-specific parameter
         assert.equal(service.includes(text), false);
         assert.equal(engine.includes(text), false);
     }
-    assert.match(workspace, /renderStrategyParameters\(strategies\[0\]\)/);
-    assert.match(workspace, /renderStrategyParameters\(strategies\.find/);
+    assert.match(workspace, /renderStrategyParameters\(strategy,Object\.fromEntries\(definition\.parameters/);
+    assert.match(workspace, /definition\.strategy_id/);
 });
 
 test("trade history preserves canonical fields and exact chart marker coordinates", () => {
@@ -175,6 +175,7 @@ test("main and research pages keep single-test and research-analysis responsibil
     const main = fs.readFileSync("app/templates/index.html", "utf8");
     const research = fs.readFileSync("app/templates/research.html", "utf8");
     const runner = fs.readFileSync("app/static/js/backtest-workspace.js", "utf8");
+    const workspace = fs.readFileSync("app/static/js/research-workspace.js", "utf8");
     const app = fs.readFileSync("app/static/js/app.js", "utf8");
     assert.match(main, /id="test-form"/);
     for (const field of ["test-strategy", "instrument", "test-timeframe", "test-start", "test-end", "test-parameters"])
@@ -193,6 +194,21 @@ test("main and research pages keep single-test and research-analysis responsibil
     assert.match(app, /research:focus-trade/);
     assert.doesNotMatch(research, /Trade History|Order &amp; Strategy Log|trade-records|execution-log-records/);
     assert.match(research, /Training → OOS selection/);
+    assert.match(research, /Latest Test source/);
+    assert.match(research, /source-context/);
+    for (const duplicated of ['id="strategy"', 'id="symbol"', 'name="timeframe"',
+        'name="start"', 'name="end"', 'name="initial_cash"', 'name="position_size"',
+        'name="commission_per_unit"', 'name="commission_rate"', 'name="spread_scale"',
+        'name="slippage"', 'name="periods_per_year"', 'name="risk_free_rate"', 'name="target_return"'])
+        assert.equal(research.includes(duplicated), false, `${duplicated} duplicates single-test setup`);
+    assert.match(research, /name="search_method"/);
+    assert.match(research, /name="training_start"/);
+    assert.match(research, /name="training_days"/);
+    assert.match(workspace, /request\("\/latest-test"\)/);
+    assert.match(workspace, /BroadcastChannel\("market-research-latest-test"\)/);
+    assert.match(runner, /BroadcastChannel\("market-research-latest-test"\)/);
+    assert.match(workspace, /strategy_id:definition\.strategy_id/);
+    assert.match(workspace, /initial_cash:config\.initial_cash/);
     assert.match(research, /Walk-forward/);
     assert.match(research, /advanced-tools/);
     assert.match(research, /Experiment records/);

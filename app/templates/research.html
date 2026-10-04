@@ -12,16 +12,16 @@
 <body>
   <header><a href="/" class="brand">MR <span>Research Workspace</span></a><a href="/">Market chart ↗</a></header>
   <main>
-    <div class="heading"><div><small>STAGE 4 · SYSTEMATIC RESEARCH</small><h1>Research experiments</h1><p>Configure repeatable runs. Training and held-out results remain distinct.</p></div><span id="api-status" role="status">Connecting…</span></div>
+    <div class="heading"><div><small>STAGE 4 · SYSTEMATIC RESEARCH</small><h1>Research experiments</h1><p>Research uses the latest successful Test from the main workspace. Training and held-out results remain distinct.</p></div><span id="api-status" role="status">Connecting…</span></div>
     <div class="workspace">
+      <section class="controls" aria-labelledby="source-title">
+        <h2 id="source-title">Latest Test source</h2>
+        <p id="source-empty" class="hint">No successful Test is available. Run a Test on the main workspace first.</p>
+        <dl id="source-context" class="source-context" hidden></dl>
+      </section>
       <form id="research-form" class="controls">
         <fieldset><legend>Workflow</legend>
           <label>Research action<select name="mode" id="mode"><option value="batch">Parameter batch</option><option value="oos">Training → OOS selection</option><option value="walk_forward">Walk-forward</option></select></label>
-          <label>Strategy<select name="strategy_id" id="strategy" required></select></label>
-          <label>Instrument<select name="symbol" id="symbol" required></select></label>
-          <label>Timeframe<select name="timeframe"><option>M1</option><option>M5</option><option>M15</option><option>H1</option><option>H4</option><option>D1</option></select></label>
-          <div class="range"><label>Overall start<input type="datetime-local" name="start" required></label><label>Overall end<input type="datetime-local" name="end" required></label></div>
-          <p id="data-range" class="hint">Market data availability will appear here.</p>
         </fieldset>
         <fieldset><legend>Parameter space</legend>
           <p id="parameter-empty" class="hint" hidden>This strategy has no configurable parameters.</p>
@@ -33,8 +33,7 @@
         </fieldset>
         <fieldset id="split-config" hidden><legend>Train / test (half-open ranges)</legend><div class="range"><label>Train start<input type="datetime-local" name="training_start"></label><label>Train end<input type="datetime-local" name="training_end"></label><label>Test start<input type="datetime-local" name="testing_start"></label><label>Test end<input type="datetime-local" name="testing_end"></label></div><p class="hint">Training selection uses training metrics only. Test data is evaluated after selection.</p></fieldset>
         <fieldset id="walk-config" hidden><legend>Walk-forward windows</legend><div class="range"><label>Training days<input type="number" name="training_days" min="1" value="365"></label><label>Test days<input type="number" name="testing_days" min="1" value="90"></label><label>Step days<input type="number" name="step_days" min="1" value="90"></label><label>Training mode<select name="anchored"><option value="true">Anchored</option><option value="false">Rolling</option></select></label></div><p class="hint">OOS windows are disjoint; step must be at least test duration.</p></fieldset>
-        <fieldset><legend>Execution &amp; analysis assumptions</legend><div class="range"><label>Initial cash<input name="initial_cash" type="number" min="0.01" step="any" value="100000"></label><label>Quantity<input name="position_size" type="number" min="0.000001" step="any" value="1"></label><label>Commission / unit<input name="commission_per_unit" type="number" min="0" step="any" value="0"></label><label>Commission rate<input name="commission_rate" type="number" min="0" step="any" value="0"></label><label>Spread scale<input name="spread_scale" type="number" min="0" step="any" value="1"></label><label>Slippage<input name="slippage" type="number" min="0" step="any" value="0"></label><label>Periods per year<input name="periods_per_year" type="number" min="0.000001" step="any" placeholder="Optional"></label><label>Annual risk-free rate<input name="risk_free_rate" type="number" min="-0.999999" step="any" value="0"></label><label>Annual target return<input name="target_return" type="number" min="-0.999999" step="any" value="0"></label></div><p class="hint">Annual rates are decimals. Set periods/year to enable annualized risk metrics and Sharpe/Sortino.</p></fieldset>
-        <button id="run-button" type="submit">Run backtest</button><p class="hint">Runs execute sequentially in the backend. Large searches may take time; results are not evidence of future performance.</p>
+        <button id="run-button" type="submit" disabled>Run parameter batch</button><p class="hint">Candidates use the latest Test's strategy, market, period, execution assumptions and analysis settings. Large searches may take time; results are not evidence of future performance.</p>
       </form>
       <section class="results">
         <div class="result-heading"><div><small>RESEARCH OUTPUT</small><h2 id="result-title">No experiment loaded</h2></div><button id="clear-results" type="button">Clear</button></div>

@@ -419,6 +419,53 @@ class ResearchAPIIntegrationTests(unittest.TestCase):
             ResearchAnalysisRepository(StaleFirstGetSession(session)).save(advanced)
             self.assertEqual(advanced_store.get(advanced.analysis_id), advanced)
 
+    def test_latest_test_pointer_tracks_success_and_ignores_failed_test(self):
+        from app.research.api import ResearchRunRequest, latest_test, run_research
+        body = {
+            "mode": "single", "strategy_id": "moving_average.sma_crossover",
+            "symbol": "EURUSD", "timeframe": "M1",
+            "start": START.isoformat(), "end": (START + timedelta(days=len(market_bars()))).isoformat(),
+            "parameters": {"fast_period": 2, "slow_period": 5},
+            "initial_cash": 2400, "position_size": 3,
+            "commission_per_unit": 0.25, "commission_rate": 0.001,
+            "spread_scale": 1.5, "slippage": 0.0002,
+            "periods_per_year": 252, "risk_free_rate": 0.03, "target_return": 0.04,
+        }
+        with self.sessions() as session:
+            self.assertIsNone(latest_test(session))
+            first = run_research(ResearchRunRequest(**body), session)["results"][0]
+            self.assertEqual(first["status"], "completed")
+            self.assertIsNotNone(first["analysis_result"])
+            current = latest_test(session)
+            self.assertEqual(current["definition"]["experiment_id"], first["definition"]["experiment_id"])
+            self.assertEqual(current["backtest_result"], first["backtest_result"])
+            config = current["definition"]["backtest_config"]
+            analysis = current["definition"]["analysis_config"]
+            self.assertEqual((config["initial_cash"], config["position_size"]), (2400, 3))
+            self.assertEqual((config["commission_per_unit"], config["commission_rate"]), (0.25, 0.001))
+            self.assertEqual((config["spread_scale"], config["slippage"]), (1.5, 0.0002))
+            self.assertEqual((analysis["periods_per_year"], analysis["risk_free_rate"],
+                              analysis["target_return"]), (252, 0.03, 0.04))
+
+            newer = dict(body, parameters={"fast_period": 3, "slow_period": 5})
+            second = run_research(ResearchRunRequest(**newer), session)["results"][0]
+            self.assertEqual(latest_test(session)["definition"]["experiment_id"],
+                             second["definition"]["experiment_id"])
+
+            no_data = dict(newer, start="2035-01-01T00:00:00", end="2035-01-10T00:00:00")
+            no_data_result = run_research(ResearchRunRequest(**no_data), session)["results"][0]
+            self.assertEqual(no_data_result["status"], "failed")
+            self.assertEqual(latest_test(session)["definition"]["experiment_id"],
+                             second["definition"]["experiment_id"])
+
+            failed = dict(newer, parameters={"fast_period": 5, "slow_period": 2})
+            from fastapi import HTTPException
+            with self.assertRaises(HTTPException) as rejected:
+                run_research(ResearchRunRequest(**failed), session)
+            self.assertEqual(rejected.exception.status_code, 422)
+            self.assertEqual(latest_test(session)["definition"]["experiment_id"],
+                             second["definition"]["experiment_id"])
+
 
 if __name__ == "__main__":
     unittest.main()

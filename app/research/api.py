@@ -154,6 +154,13 @@ def strategies(db: Session = Depends(get_db)):
     return ResearchApplicationService(db).available_strategies()
 
 
+@router.get("/latest-test")
+def latest_test(db: Session = Depends(get_db)):
+    """Expose the latest successful canonical single-test result to Research."""
+    result = ResearchResultRepository(db).latest_single_run()
+    return None if result is None else _encode_research(result)
+
+
 @router.get("/market-data/{symbol}")
 def market_data_catalog(symbol: str, db: Session = Depends(get_db)):
     return ResearchApplicationService(db).market_data_catalog(symbol)
@@ -163,6 +170,11 @@ def market_data_catalog(symbol: str, db: Session = Depends(get_db)):
 def run_research(request: ResearchRunRequest, db: Session = Depends(get_db)):
     try:
         result = ResearchApplicationService(db).run(request.model_dump(exclude_none=True))
+        if request.mode == "single":
+            completed = next((item for item in result.results
+                              if item.status.value == "completed"), None)
+            if completed is not None:
+                ResearchResultRepository(db).mark_latest_single(completed)
         if request.mode == "walk_forward":
             aggregate = aggregate_walk_forward(result)
             records = tuple(item for window in result.windows for item in
